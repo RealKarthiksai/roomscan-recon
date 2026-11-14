@@ -101,6 +101,8 @@ def run_dense_mesh_texture(
             str(p.min_resolution),
             "--number-views",
             str(p.number_views),
+            "--remove-dmaps",
+            "1",
             *common,
         ],
         out,

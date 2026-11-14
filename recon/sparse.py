@@ -65,8 +65,9 @@ def export_for_openmvs(scene: SparseScene, out: Path, image_names: list[str] | N
     else:
         rec = pycolmap.Reconstruction(scene.model_dir)
         keep = set(image_names)
-        for iid in [i for i, im in rec.images.items() if im.name not in keep]:
-            rec.deregister_image(iid)
+        drop = [im.frame_id for im in rec.images.values() if im.name not in keep]
+        for fid in drop:  # pycolmap 4.x: images are registered through their frame
+            rec.deregister_frame(fid)
         rec.write(stage)
     run_tool(
         "InterfaceCOLMAP",

@@ -1,4 +1,4 @@
-"""Enforce docs/INTERFACES.md §6: spatial/ and recon/ never import each other; pipeline
+"""Enforce docs/INTERFACES.md §8: spatial/ and recon/ never import each other; pipeline
 code never imports eval/."""
 
 import ast

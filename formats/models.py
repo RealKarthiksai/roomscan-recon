@@ -268,3 +268,29 @@ class SpatialQuality(Strict):
     floor_area_m2: float | None
     floor_polygon_source: str
     warnings: list[str]
+
+
+# ---- Phase 10: Reconstruction (Part 4 output) --------------------------------------------
+
+
+class OutputEntry(Strict):
+    """One Part 4 product. Mesh and splat are separate entries with separate metrics: neither
+    is derived from the other."""
+
+    status: Literal["ok", "skipped", "failed"]
+    reason: str | None = Field(None, description="why skipped / failed")
+    files: list[str] = Field(default=[], description="paths relative to the reconstruction root")
+    metrics: dict = {}
+
+
+class ReconstructionManifest(Strict):
+    format: Literal["room.reconstruction"] = "room.reconstruction"
+    version: str = FORMAT_VERSION
+    created: str
+    spatial_map: dict = Field(description="path, manifest_sha256 and quality warnings of the input")
+    outputs: dict[str, OutputEntry] = Field(description="sparse, dense, mesh, splat")
+    files: dict[str, str] = Field(description="relative path -> sha256 of every file but this one")
+    timings_s: dict[str, float]
+    peak_ram_mb: float
+    params: dict
+    versions: dict[str, str]

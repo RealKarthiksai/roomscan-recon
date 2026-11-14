@@ -128,7 +128,66 @@ recesses and bays are not modelled in v1.
 peak_vram_mb|null, versions{python, numpy, open3d, pycolmap, torch, transformers, git_commit},
 params{…}, inputs{path: sha256}, outputs{path: sha256}, metrics{…}, notes[]`
 
-## 6. Module boundaries
+## 6. Phase 6: SpatialMap (Part 3 output, Part 4 input)
+
+`python -m spatial.cli run --dataset {replica,tum,eth3d} --src <scene> --out <run> [--max-frames N] [--stride K] [--downscale D] [--prior gt|gt_noisy|none] [--depth-scale] [--phase3-downscale 2]`
+runs P1 → P2 → P3 → P5 → P6 and writes `<run>/spatial_map/`. Code: `spatial/pipeline.py`,
+`spatial/spatial_map.py`; reader/verifier (no `spatial` import): `formats/spatial_map.py`.
+Large files are hard-linked from the stage outputs when possible. Schemas: `spec/spatial_map/*.json`
+(generated from `formats/models.py` by `scripts/export_schemas.py`; a test fails if stale).
+
+```
+spatial_map/
+  manifest.json      SpatialMapManifest: format "room.spatial_map", version, created, source, frame_ids,
+                     files{path: sha256} of EVERY other file, stages{phase2|3|5: status, wall_time_s,
+                     peak_ram_mb, device}, params, versions, conventions
+  cameras/cameras.json  CamerasFile: image + depth intrinsics, pose_source, metric, gravity_aligned,
+                     frames{id: T_world_camera} for all registered frames
+  images/<id>.jpg    undistorted images of all registered frames (needed by dense, texture, splats)
+  sparse/            COLMAP cameras.bin images.bin points3D.bin (cam_from_world, as COLMAP)
+  depth/<id>.png     uint16 mm metric depth of the fused frames; depth/depth_alignment.json
+  depth_valid/<id>.png  final validity mask (255)
+  fused_cloud.ply    fused point cloud (xyz, rgb, normals), world frame
+  tsdf_mesh.ply      TSDF mesh (debug / planes only: NOT a Part 4 output)
+  planes.json room.json   §4
+  quality.json       SpatialQuality: registration, scale source/confidence, depth validity,
+                     wall/floor deviation, floor tilt, and `warnings[]` (rule-based, see
+                     spatial/spatial_map.py quality_report)
+```
+`load_spatial_map(path)` re-hashes every listed file and reports missing, modified and
+unlisted files (`verify()`), so Part 4 never consumes a corrupted or half-written map.
+Version policy: 0.x; additive optional fields bump the minor version.
+
+Depth sources (Phase 3, `--depth-source`): `sensor`; `mvs` (OpenMVS depth maps, confidence ≥ 0.5;
+default when no sensor); `hybrid` (MVS, holes filled with scale-aligned mono depth: measured no
+better than `mvs`, kept as an option); `mono` (Depth-Anything-V2-Small aligned to sparse points:
+fallback only). `refine --depth-scale` corrects the metric scale from sensor depth.
+
+## 7. Phase 10: Reconstruction (Part 4 output)
+
+`python -m recon.cli run --spatial-map <run>/spatial_map --out <run>/reconstruction [--resolution-level 1] [--splat auto|yes|no] [--heldout-every 8] [--refine]`
+Code: `recon/` (sparse.py, dense.py, openmvs.py, render.py, evaluate.py, splat/, package.py);
+reader/verifier: `formats/reconstruction.py`. `recon` never imports `spatial`.
+
+```
+reconstruction/
+  manifest.json   ReconstructionManifest: format "room.reconstruction", spatial_map{path,
+                  manifest_sha256, quality_warnings}, outputs{sparse|dense|mesh|splat: OutputEntry},
+                  files{path: sha256}, timings_s, peak_ram_mb, params, versions
+  sparse/         the model Part 3 refined, unchanged
+  dense/          OpenMVS scene_dense.mvs/.ply
+  mesh/           mesh.ply, [mesh_refined.ply], textured/mesh.obj|mtl|textures, mesh.glb
+  splat/          point_cloud.ply (standard 3DGS layout), cfg.json, train_log.jsonl, ckpt_last.pt
+  eval/           metrics.json, mesh_heldout/<frame>_render_vs_gt.jpg, splat metrics
+```
+`OutputEntry = {status: ok|skipped|failed, reason, files[], metrics{}}`. Mesh and splat are
+separate entries with separate metrics; the splat is trained from the SpatialMap, never from
+the mesh. A product that cannot be made is `skipped`/`failed` with the reason (e.g. splat on a
+machine without CUDA); nothing is fabricated. Held-out: every `--heldout-every`-th image is
+removed from the sparse model before densification/texturing and from splat training, and the
+held-out photographs are the evaluation target.
+
+## 8. Module boundaries
 
 - `spatial/` (Part 3) and `recon/` (Part 4) never import each other.
 - Both may import `formats/`. Only tests/benchmarks import `eval/`; pipeline code never does.
