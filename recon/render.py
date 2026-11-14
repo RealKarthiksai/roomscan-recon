@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
 import open3d as o3d
 import trimesh
@@ -19,6 +18,20 @@ class _Part:
     uv: np.ndarray | None  # (V, 2) per vertex
     tex: np.ndarray | None  # (h, w, 3) uint8 RGB
     gray: np.ndarray  # fallback colour for untextured parts
+
+
+def _bilinear(tex: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Bilinear texture lookup at pixel-centre coordinates (x, y), border-replicated."""
+    h, w = tex.shape[:2]
+    x = np.clip(x, 0, w - 1)
+    y = np.clip(y, 0, h - 1)
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    x1, y1 = np.minimum(x0 + 1, w - 1), np.minimum(y0 + 1, h - 1)
+    fx, fy = (x - x0)[:, None], (y - y0)[:, None]
+    t = tex.astype(np.float32)
+    top = t[y0, x0] * (1 - fx) + t[y0, x1] * fx
+    bot = t[y1, x0] * (1 - fx) + t[y1, x1] * fx
+    return np.clip(top * (1 - fy) + bot * fy + 0.5, 0, 255).astype(np.uint8)
 
 
 class TexturedMesh:
@@ -71,12 +84,10 @@ class TexturedMesh:
             w = np.stack([1 - b[:, 0] - b[:, 1], b[:, 0], b[:, 1]], 1)
             uv = (part.uv[f] * w[..., None]).sum(1)
             h_, w_ = part.tex.shape[:2]
-            mapx = (uv[:, 0] * w_ - 0.5).astype(np.float32).reshape(-1, 1)
-            mapy = ((1 - uv[:, 1]) * h_ - 0.5).astype(np.float32).reshape(-1, 1)
-            samp = cv2.remap(
-                part.tex, mapx, mapy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
-            )
-            rgb[sel] = samp.reshape(-1, 3)
+            x = uv[:, 0] * w_ - 0.5
+            y = (1 - uv[:, 1]) * h_ - 0.5
+            samp = _bilinear(part.tex, x, y)
+            rgb[sel] = samp
         return rgb, hit, depth
 
 

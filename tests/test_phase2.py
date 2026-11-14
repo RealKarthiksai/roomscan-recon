@@ -68,7 +68,8 @@ def test_eth3d_sfm_only(tmp_path):
 @pytest.mark.heavy
 @pytest.mark.xfail(
     strict=False,
-    reason="KNOWN MISS (measured 2026-11-14): pycolmap 4.2.1 global mapper registers 26/26 at 0.51 px "
+    reason="KNOWN MISS (measured 2026-11-14): pycolmap 4.2.1 global mapper registers 26/26 at "
+    "0.51 px "
     "but returns a geometrically wrong model on ETH3D office (Sim(3) residual 3.6 m vs the "
     "incremental model over a 10 m extent, rotation error ~177 deg, ATE median 0.41 m). "
     "mapper='global' is experimental; 'incremental' stays the default.",
