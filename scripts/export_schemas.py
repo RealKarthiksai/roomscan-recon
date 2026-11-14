@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from formats import models as m
+from formats.scanbundle import ScanBundleManifest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = {
@@ -20,6 +21,7 @@ SCHEMAS = {
     "workspace/workspace_meta": m.WorkspaceMeta,
     "reconstruction/manifest": m.ReconstructionManifest,
     "qa/job_report": m.JobReport,
+    "scanbundle/manifest": ScanBundleManifest,
     "stage_meta": m.StageMeta,
     "depth_alignment": m.DepthAlignment,
 }

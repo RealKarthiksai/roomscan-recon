@@ -25,7 +25,8 @@ class SourceFrame:
     timestamp_ns: int
     rgb: Path
     depth: Path | None
-    T_world_camera_gt: np.ndarray  # dataset GT frame (OpenCV camera axes)
+    T_world_camera_gt: np.ndarray | None  # dataset GT frame (OpenCV axes); None for real bundles
+    T_world_camera_device: np.ndarray | None = None  # device pose (ARKit/ARCore), OpenCV axes
 
 
 @dataclass
@@ -43,6 +44,8 @@ class SourceDataset:
     gravity_world_gt: np.ndarray | None = None  # unit, pointing down, dataset GT frame
     gravity_source: str = "none"
     gt_geometry: Path | None = None
+    has_gt: bool = True  # False for real captures (Scan Bundles): no ground truth anywhere
+    device_pose_source: str = "none"  # arkit | arcore | none (device poses, not GT)
     notes: list[str] = field(default_factory=list)
 
 
@@ -233,4 +236,15 @@ def load_eth3d(root: Path) -> SourceDataset:
     )
 
 
-LOADERS = {"replica": load_replica, "tum": load_tum, "eth3d": load_eth3d}
+def load_scanbundle(root: Path) -> SourceDataset:
+    from spatial.io.scanbundle import load_scanbundle as _load  # lazy: avoids an import cycle
+
+    return _load(root)
+
+
+LOADERS = {
+    "replica": load_replica,
+    "tum": load_tum,
+    "eth3d": load_eth3d,
+    "scanbundle": load_scanbundle,
+}

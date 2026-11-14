@@ -102,4 +102,5 @@ select = ["E", "F", "I", "UP", "B"]
 "scripts/heavy/render_docs.py" = ["E501"]   # Markdown table literals
 "benchmarks/phase3_suite.py" = ["E501"]     # Markdown table literals
 "scripts/render_phase_reports.py" = ["E501"]  # report text literals
+"formats/scanbundle.py" = ["E501"]  # validator message strings
 "tests/test_phase3_heavy.py" = ["E501"]

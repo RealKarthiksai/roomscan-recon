@@ -16,15 +16,35 @@ def _run_dir(out: Path | None, tag: str) -> Path:
     return out or Path("runs") / f"{datetime.now():%Y%m%d-%H%M%S}_{tag}"
 
 
+@app.command("validate-bundle")
+def validate_bundle_cmd(
+    bundle: Annotated[Path, typer.Option(help="Scan Bundle directory (docs/SCAN_BUNDLE.md)")],
+    skip_checksums: bool = False,
+):
+    """Validate a Scan Bundle; exit code 1 when there is at least one error."""
+    from formats.scanbundle import validate_bundle
+
+    issues, man = validate_bundle(bundle, check_checksums=not skip_checksums)
+    for i in issues:
+        typer.echo(str(i))
+    errors = sum(i.level == "error" for i in issues)
+    typer.echo(
+        json.dumps(
+            {"errors": errors, "warnings": len(issues) - errors, "tier": man.tier if man else None}
+        )
+    )
+    raise typer.Exit(1 if errors else 0)
+
+
 @app.command()
 def ingest(
-    dataset: Annotated[str, typer.Option(help="replica | tum | eth3d")],
+    dataset: Annotated[str, typer.Option(help="replica | tum | eth3d | scanbundle")],
     src: Annotated[Path, typer.Option(help="dataset scene directory")],
     out: Annotated[Path | None, typer.Option(help="run directory")] = None,
     max_frames: int | None = None,
     stride: int = 1,
     downscale: int = 1,
-    prior: Annotated[str, typer.Option(help="gt | gt_noisy | none")] = "gt_noisy",
+    prior: Annotated[str, typer.Option(help="gt | gt_noisy | device | none")] = "gt_noisy",
     noise_preset: str = "vio_small",
     seed: int = 0,
 ):
@@ -177,13 +197,13 @@ def room(
 
 @app.command()
 def run(
-    dataset: Annotated[str, typer.Option(help="replica | tum | eth3d")],
+    dataset: Annotated[str, typer.Option(help="replica | tum | eth3d | scanbundle")],
     src: Annotated[Path, typer.Option(help="dataset scene directory")],
     out: Annotated[Path | None, typer.Option(help="run directory")] = None,
     max_frames: int | None = None,
     stride: int = 1,
     downscale: int = 1,
-    prior: Annotated[str, typer.Option(help="gt | gt_noisy | none")] = "gt_noisy",
+    prior: Annotated[str, typer.Option(help="gt | gt_noisy | device | none")] = "gt_noisy",
     noise_preset: str = "vio_small",
     seed: int = 0,
     depth_scale: Annotated[bool, typer.Option(help="scale from sensor depth")] = False,

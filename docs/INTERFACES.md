@@ -187,7 +187,30 @@ machine without CUDA); nothing is fabricated. Held-out: every `--heldout-every`-
 removed from the sparse model before densification/texturing and from splat training, and the
 held-out photographs are the evaluation target.
 
-## 8. Module boundaries
+## 8. Exports, QA report, router (consumers of the SpatialMap / Reconstruction)
+
+All three read only `formats/` (enforced by `tests/test_module_boundaries.py`).
+
+- `python -m export.cli all --spatial-map <dir> --out <dir>`: `floorplan.svg`, `floorplan.dxf`
+  (R2010, metres; layers FLOOR_OUTLINE, WALLS, DIMENSIONS, NOTES), `room_shell.usda` (closed,
+  consistently oriented room shell; `usdzip` converts to USDZ), `fused_cloud.laz` (1 mm),
+  `measurements.json` (area, perimeter, wall lengths, ceiling height, volume, scale confidence).
+  A room without a floor polygon is reported under `skipped`, never written empty. E57 is not
+  produced (convert the LAZ with PDAL/CloudCompare); splat compression (SPZ) and glTF
+  `KHR_gaussian_splatting` are not implemented.
+- `python -m qa.cli report --spatial-map <dir> [--reconstruction <dir>] --out job_report.json`:
+  `JobReport` (`spec/qa/job_report.schema.json`): `verdict` pass | pass_with_warnings |
+  needs_rescan, `gates[]` (category capture|output, status pass|warn|fail|skipped, value,
+  threshold), per-surface `coverage`, and `rescan[]` regions with 4 world-frame corners, reason
+  (`unseen`, `few_views`, `narrow_baseline`), priority and a readable instruction. Thresholds:
+  `qa/thresholds.py`. Coverage ignores occlusion. A failed *capture* gate gives needs_rescan; a
+  failed *output* gate (mesh/splat quality) never does, but is never hidden; a skipped splat is
+  not a pass.
+- `python -m router.cli plan -o mesh -o floorplan --tier A [--cuda] [--budget-min N]`: stage plan
+  (commands, where=local|gpu_worker, estimates), refusals (RGB-only semantic outputs, scans that
+  failed QA) and warnings. Never lowers accuracy settings to meet a budget (`over_budget` flag).
+
+## 9. Module boundaries
 
 - `spatial/` (Part 3) and `recon/` (Part 4) never import each other.
 - Both may import `formats/`. Only tests/benchmarks import `eval/`; pipeline code never does.

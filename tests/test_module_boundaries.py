@@ -1,4 +1,4 @@
-"""Enforce docs/INTERFACES.md §8: spatial/ and recon/ never import each other; pipeline
+"""Enforce docs/INTERFACES.md §9: spatial/ and recon/ never import each other; pipeline
 code never imports eval/."""
 
 import ast
@@ -13,6 +13,7 @@ FORBIDDEN = {
     "formats": {"spatial", "recon", "eval"},
     "export": {"spatial", "recon", "eval"},
     "qa": {"spatial", "recon", "eval"},
+    "router": {"spatial", "recon", "eval", "qa", "export"},
 }
 
 

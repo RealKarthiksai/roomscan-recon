@@ -88,6 +88,10 @@ def ingest(
     ws = out / "workspace"
     with record_stage("phase1_ingest", out / "phase1", params=params) as rec:
         ds = LOADERS[dataset](src)
+        if not ds.has_gt and prior in ("gt", "gt_noisy"):
+            raise ValueError(f"{dataset} has no ground truth: use prior='device' or 'none'")
+        if prior == "device" and ds.device_pose_source == "none":
+            raise ValueError(f"{dataset} has no device poses: use prior='none'")
         frames = ds.frames[::stride]
         if keyframes is None:
             frames = frames[:max_frames]
@@ -101,13 +105,15 @@ def ingest(
         K[1, 1] /= downscale
         K[0, 2] = (K[0, 2] + 0.5) / downscale - 0.5
         K[1, 2] = (K[1, 2] + 0.5) / downscale - 0.5
-        for d in ["images", "depth", "gt"]:
+        for d in ["images", "depth", *(["gt"] if ds.has_gt else [])]:
             (ws / d).mkdir(parents=True, exist_ok=True)
 
         T_gt = [f.T_world_camera_gt for f in frames]
         noise = None
         if prior == "gt":
             T_prior, pose_source = T_gt, "dataset_gt"
+        elif prior == "device":
+            T_prior, pose_source = [f.T_world_camera_device for f in frames], ds.device_pose_source
         elif prior == "gt_noisy":
             if ds.gravity_world_gt is None:
                 raise ValueError("gt_noisy prior needs a gravity direction")
@@ -179,20 +185,24 @@ def ingest(
         )
         (ws / "workspace_meta.json").write_text(meta.model_dump_json(indent=1))
 
-        # Ground truth: evaluation only (docs/INTERFACES.md §0).
-        (ws / "gt" / "poses_gt.json").write_text(
-            json.dumps({f"{f.index:06d}": T.tolist() for f, T in zip(frames, T_gt, strict=True)})
-        )
-        gt_ref = {
-            "dataset": dataset,
-            "scene": ds.scene,
-            "frame": "dataset GT world",
-            "gravity_world": None if ds.gravity_world_gt is None else ds.gravity_world_gt.tolist(),
-            "gravity_source": ds.gravity_source,
-        }
-        if ds.gt_geometry is not None and ds.gt_geometry.exists():
-            gt_ref |= {"geometry": str(ds.gt_geometry), "sha256": sha256_file(ds.gt_geometry)}
-        (ws / "gt" / "gt_ref.json").write_text(json.dumps(gt_ref, indent=1))
+        if ds.has_gt:  # Ground truth: evaluation only (docs/INTERFACES.md §0).
+            (ws / "gt" / "poses_gt.json").write_text(
+                json.dumps(
+                    {f"{f.index:06d}": T.tolist() for f, T in zip(frames, T_gt, strict=True)}
+                )
+            )
+            gt_ref = {
+                "dataset": dataset,
+                "scene": ds.scene,
+                "frame": "dataset GT world",
+                "gravity_world": None
+                if ds.gravity_world_gt is None
+                else ds.gravity_world_gt.tolist(),
+                "gravity_source": ds.gravity_source,
+            }
+            if ds.gt_geometry is not None and ds.gt_geometry.exists():
+                gt_ref |= {"geometry": str(ds.gt_geometry), "sha256": sha256_file(ds.gt_geometry)}
+            (ws / "gt" / "gt_ref.json").write_text(json.dumps(gt_ref, indent=1))
 
         rec.metrics |= {
             "n_frames": len(fp),

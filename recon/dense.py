@@ -53,12 +53,26 @@ def poisson_mesh(dense_ply: Path, out_ply: Path, depth: int = 9) -> dict:
     return {"vertices": len(mesh.vertices), "faces": len(mesh.triangles)}
 
 
-def export_glb(textured_obj: Path | None, mesh_ply: Path, glb: Path) -> str:
-    """Textured OBJ -> GLB when available, else the untextured PLY. Returns what was exported."""
+def export_glb(
+    textured_obj: Path | None, mesh_ply: Path, glb: Path, obj_v_down: bool = True
+) -> str:
+    """Textured OBJ -> GLB when available, else the untextured PLY. Returns what was exported.
+
+    OpenMVS writes texture coordinates with v measured from the TOP of the atlas (measured, see
+    recon/render.py). trimesh assumes OBJ v points up and flips it for glTF, so for OpenMVS output
+    v is flipped first: the GLB then samples the atlas exactly as the OBJ does
+    (tests/test_render.py::test_glb_export_matches_openmvs_obj)."""
     import trimesh
 
     src = textured_obj if textured_obj is not None and textured_obj.exists() else mesh_ply
-    scene = trimesh.load(str(src), process=False)
+    scene = trimesh.load(str(src), process=False, force="scene")
+    if src == textured_obj and obj_v_down:
+        for g in scene.geometry.values():
+            vis = getattr(g, "visual", None)
+            if isinstance(vis, trimesh.visual.TextureVisuals) and vis.uv is not None:
+                uv = np.asarray(vis.uv, float).copy()
+                uv[:, 1] = 1.0 - uv[:, 1]
+                vis.uv = uv
     scene.export(str(glb))
     return "textured" if src == textured_obj else "untextured"
 
