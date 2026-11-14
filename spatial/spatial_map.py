@@ -35,6 +35,7 @@ CONVENTIONS = {
     "pose": "T_world_camera (camera to world), 4x4 row-major",
     "depth_png": "uint16 millimetres, 0 = invalid; depth_valid/*.png is the final mask (255)",
     "colmap_model": "sparse/ stores cam_from_world as COLMAP does",
+    "images": "images/<frame>.jpg, undistorted, at cameras.json width x height",
 }
 
 
@@ -147,6 +148,7 @@ def write_spatial_map(
         gravity_aligned=bool(align.get("gravity_aligned")),
         frames={k: poses[k] for k in sorted(poses)},
     )
+    pri_frame_image = {f.id: f.image for f in pri.frames}
     planes = PlanesFile.model_validate_json((phase5_dir / "planes.json").read_text())
     room = RoomModel.model_validate_json((phase5_dir / "room.json").read_text())
     p2 = StageMeta.model_validate_json((phase2_dir / "meta.json").read_text())
@@ -158,6 +160,8 @@ def write_spatial_map(
     (out / "cameras" / "cameras.json").write_text(cams.model_dump_json(indent=1))
     for n in ("cameras.bin", "images.bin", "points3D.bin"):
         _put(ws / "sparse" / "0" / n, out / "sparse" / n, link)
+    for i in cams.frames:  # all registered frames: Part 4 (texture, splats) needs the images
+        _put(ws / pri_frame_image[i], out / "images" / f"{i}.jpg", link)
     for i in ids:
         _put(phase3_dir / "depth_aligned" / f"{i}.png", out / "depth" / f"{i}.png", link)
         _put(phase3_dir / "depth_valid" / f"{i}.png", out / "depth_valid" / f"{i}.png", link)

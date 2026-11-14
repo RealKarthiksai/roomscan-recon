@@ -78,6 +78,9 @@ def fixture(tmp_path_factory):
     (ws / "workspace_meta.json").write_text(json.dumps({"dataset": "fixture", "scene": "x"}))
     for n in ("cameras.bin", "images.bin", "points3D.bin"):
         (ws / "sparse" / "0" / n).write_bytes(n.encode())
+    (ws / "images").mkdir()
+    for i in ids:
+        cv2.imwrite(str(ws / "images" / f"{i}.jpg"), np.zeros((48, 64, 3), np.uint8))
     (p2 / "meta.json").write_text(
         _meta(
             "phase2_refine",
@@ -119,6 +122,7 @@ def test_write_load_verify_and_tamper(fixture):
     assert sm.room.floor_polygon_source in ("wall_intersections", "footprint_contour")
     assert sm.quality.n_walls == 4 and sm.quality.warnings == []
     assert sm.manifest.files["fused_cloud.ply"] and verify(out) == []
+    assert sorted(p.name for p in sm.images_dir.glob("*.jpg")) == ["000000.jpg", "000001.jpg"]
     # schema validation of every JSON file against spec/ (the published contract)
     for rel, schema in [
         ("manifest.json", "spatial_map/manifest"),

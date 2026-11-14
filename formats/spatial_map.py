@@ -54,6 +54,10 @@ class SpatialMap:
     def sparse_dir(self) -> Path:
         return self.root / "sparse"
 
+    @property
+    def images_dir(self) -> Path:
+        return self.root / "images"
+
     def depth_png(self, frame_id: str) -> Path:
         return self.root / "depth" / f"{frame_id}.png"
 
