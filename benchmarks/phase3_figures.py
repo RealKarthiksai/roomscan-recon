@@ -24,7 +24,7 @@ import open3d as o3d  # noqa: E402
 from scipy.spatial import cKDTree  # noqa: E402
 
 from benchmarks.phase3 import BENCH  # noqa: E402
-from eval.gt import load_mesh  # noqa: E402
+from eval.gt import load_mesh, resolve_gt_path  # noqa: E402
 from eval.recon_metrics import cull_to_cameras, sample_mesh  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "docs" / "TEST_EVIDENCE" / "phase3"
@@ -49,7 +49,7 @@ def heatmaps(scene: str, run: str, max_cm: float = 10.0, n_show: int = 150_000):
     )
     W, H = meta["metrics"]["width"], meta["metrics"]["height"]
     gt_poses = json.loads((ws / "gt" / "poses_gt.json").read_text())
-    mesh = load_mesh(Path(ref["geometry"]))
+    mesh = load_mesh(resolve_gt_path(ref["geometry"]))
     pc = sample_mesh(mesh, 400_000, 0)
     keep = cull_to_cameras(
         np.asarray(pc.points), [(np.asarray(gt_poses[i]), K, W, H) for i in ids], gt_mesh=mesh

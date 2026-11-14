@@ -52,6 +52,9 @@ def refine(
     max_image_size: int = 1024,
     matcher: Annotated[str, typer.Option(help="auto | exhaustive | seq")] = "auto",
     prior_mode: Annotated[str, typer.Option(help="sim3 | ba")] = "sim3",
+    depth_scale: Annotated[
+        bool, typer.Option(help="correct the metric scale from sensor depth (needs depth/)")
+    ] = False,
 ):
     """Phase 2: pose refinement -> metric, gravity-aligned sparse/0."""
     from spatial.sfm.refine import refine as _refine
@@ -62,6 +65,7 @@ def refine(
         max_image_size=max_image_size,
         matcher=matcher,
         prior_mode=prior_mode,
+        depth_scale=depth_scale,
     )
     typer.echo(
         json.dumps({k: v for k, v in r.items() if not k.startswith(("sim3_R", "R_"))}, default=str)
@@ -72,7 +76,7 @@ def refine(
 def phase3(
     workspace: Annotated[Path, typer.Option(help="Phase 2 workspace directory")],
     out: Annotated[Path | None, typer.Option(help="output dir (default <run>/phase3)")] = None,
-    depth_source: Annotated[str, typer.Option(help="sensor | mono | auto")] = "auto",
+    depth_source: Annotated[str, typer.Option(help="sensor | mvs | mono | auto")] = "auto",
     model: Annotated[
         str, typer.Option(help="small | base | large (base/large: CC-BY-NC)")
     ] = "small",
@@ -147,10 +151,11 @@ def room(
     from spatial.room.planes import PlaneParams
     from spatial.room.run import run_room
 
-    scale_source = "unknown"
+    scale_source, align = "unknown", None
     if workspace is not None:
         al = workspace / "alignment.json"
-        if al.exists() and not json.loads(al.read_text()).get("gravity_aligned", True):
+        align = json.loads(al.read_text()) if al.exists() else None
+        if align is not None and not align.get("gravity_aligned", True):
             raise typer.BadParameter(
                 f"{al}: world frame is not gravity-aligned (no gravity prior); floor/ceiling/"
                 "wall labels would be meaningless"
@@ -160,8 +165,45 @@ def room(
             scale_source = "metric_priors"
         elif pri.depth_source in ("lidar", "kinect"):
             scale_source = "sensor_depth"
-    r = run_room(cloud, out, PlaneParams(voxel=voxel, seed=seed), scale_source)
+        if align is not None and align.get("scale_source") == "sensor_depth":
+            scale_source = "sensor_depth"
+    r = run_room(cloud, out, PlaneParams(voxel=voxel, seed=seed), scale_source, align)
     typer.echo(json.dumps(r["metrics"], default=str))
+
+
+@app.command()
+def run(
+    dataset: Annotated[str, typer.Option(help="replica | tum | eth3d")],
+    src: Annotated[Path, typer.Option(help="dataset scene directory")],
+    out: Annotated[Path | None, typer.Option(help="run directory")] = None,
+    max_frames: int | None = None,
+    stride: int = 1,
+    downscale: int = 1,
+    prior: Annotated[str, typer.Option(help="gt | gt_noisy | none")] = "gt_noisy",
+    noise_preset: str = "vio_small",
+    seed: int = 0,
+    depth_scale: Annotated[bool, typer.Option(help="scale from sensor depth")] = False,
+    phase3_downscale: int = 2,
+):
+    """Phases 1-6 in one command -> <out>/spatial_map (docs/INTERFACES.md §6)."""
+    from spatial.fusion.tsdf import TSDFParams
+    from spatial.phase3 import Phase3Config
+    from spatial.pipeline import run_pipeline
+
+    sm = run_pipeline(
+        dataset,
+        src,
+        _run_dir(out, f"run_{dataset}"),
+        max_frames=max_frames,
+        stride=stride,
+        downscale=downscale,
+        prior=prior,
+        noise_preset=noise_preset,
+        seed=seed,
+        depth_scale=depth_scale,
+        phase3=Phase3Config(downscale=phase3_downscale, tsdf_p=TSDFParams(voxel=0.02)),
+    )
+    typer.echo(json.dumps({"spatial_map": str(sm)}))
 
 
 if __name__ == "__main__":

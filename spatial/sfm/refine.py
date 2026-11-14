@@ -11,6 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pycolmap
 
@@ -29,6 +30,50 @@ def _transform_reconstruction(rec: pycolmap.Reconstruction, s: float, R: np.ndar
     rec.transform(pycolmap.Sim3d(s, pycolmap.Rotation3d(R), t.reshape(3, 1)))
 
 
+def depth_scale_factor(
+    model: pycolmap.Reconstruction,
+    ws: Path,
+    pri: Priors,
+    min_obs: int = 20,
+    min_images: int = 5,
+    depth_range_m: tuple[float, float] = (0.2, 6.0),
+) -> dict:
+    """Metric scale from sensor depth: per image, median of (sensor depth at a sparse keypoint)
+    / (that point's depth in the current model); the global factor is the median over images.
+    Independent of the (drifting) pose priors, so it fixes prior-inherited scale error."""
+    per_image = []
+    for img in model.images.values():
+        if not img.has_pose:
+            continue
+        stem = Path(img.name).stem
+        fr = next((f for f in pri.frames if f.id == stem), None)
+        if fr is None or fr.depth is None:
+            continue
+        d_img = cv2.imread(str(ws / fr.depth), cv2.IMREAD_UNCHANGED)
+        if d_img is None:
+            continue
+        d_img = d_img.astype(np.float64) * pri.depth_scale_m
+        T_cw = np.linalg.inv(_T_world_cam(img))
+        ratios = []
+        for p2 in img.points2D:
+            if not p2.has_point3D():
+                continue
+            u, v = int(np.floor(p2.xy[0])), int(np.floor(p2.xy[1]))
+            if not (0 <= v < d_img.shape[0] and 0 <= u < d_img.shape[1]):
+                continue
+            d = d_img[v, u]
+            z = (T_cw[:3, :3] @ model.points3D[p2.point3D_id].xyz + T_cw[:3, 3])[2]
+            if depth_range_m[0] <= d <= depth_range_m[1] and z > 1e-6:
+                ratios.append(d / z)
+        if len(ratios) >= min_obs:
+            per_image.append(float(np.median(ratios)))
+    if len(per_image) < min_images:
+        return {"status": "insufficient", "n_images": len(per_image)}
+    s = float(np.median(per_image))
+    mad = float(np.median(np.abs(np.asarray(per_image) - s)))
+    return {"status": "ok", "scale": s, "n_images": len(per_image), "mad": mad}
+
+
 def refine(
     ws: Path,
     run: Path,
@@ -40,6 +85,7 @@ def refine(
     prior_mode: str = "sim3",
     seed: int = 0,
     sim3_max_error_m: float = 0.10,
+    depth_scale: bool = False,
 ) -> dict:
     pri = Priors.model_validate_json((ws / "priors.json").read_text())
     # prior_mode: "sim3" = pure SfM, then robust Sim(3) to priors (priors don't bend the
@@ -51,6 +97,7 @@ def refine(
         prior_mode=prior_mode,
         seed=seed,
         sim3_max_error_m=sim3_max_error_m,
+        depth_scale=depth_scale,
     )
     with record_stage("phase2_refine", run / "phase2", params=params) as rec:
         work = run / "phase2" / "colmap"
@@ -169,6 +216,18 @@ def refine(
                 "prior_residual_p95_m": float(np.percentile(resid, 95)),
                 "prior_inliers": int((resid < sim3_max_error_m).sum()),
             }
+            if depth_scale:
+                ds = depth_scale_factor(model, ws, pri)
+                align["depth_scale"] = ds
+                if ds["status"] == "ok":
+                    centres = np.array(
+                        [_T_world_cam(i)[:3, 3] for i in model.images.values() if i.has_pose]
+                    )
+                    c = centres.mean(0)  # scale about the trajectory centroid
+                    _transform_reconstruction(model, ds["scale"], np.eye(3), (1 - ds["scale"]) * c)
+                    align["scale_source"] = "sensor_depth"
+                else:
+                    rec.notes.append(f"depth scale skipped: {ds}")
             # 6. Gravity: rotate prior world so gravity -> -Z (our world frame).
             if pri.gravity_world is not None:
                 Rg = rotation_aligning(np.asarray(pri.gravity_world), np.array([0, 0, -1.0]))

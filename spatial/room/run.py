@@ -9,8 +9,26 @@ import numpy as np
 import open3d as o3d
 
 from formats.models import Plane, PlanesFile, RoomModel
+from spatial.geometry import rotation_aligning
 from spatial.room.planes import PlaneParams, detect_planes, floor_polygon, label_planes
 from spatial.stage import record_stage
+
+_SCALE_BASE = {"synthetic": 1.0, "sensor_depth": 0.9, "metric_priors": 0.7, "unknown": 0.0}
+
+
+def scale_confidence(scale_source: str, alignment: dict | None = None) -> float:
+    """HEURISTIC in [0, 1], not a calibrated probability. Base value by where the metric scale
+    comes from (sensor depth 0.9, metric pose priors 0.7, unknown 0). Reduced by 0.2 when the
+    pose priors disagree with the SfM trajectory (p95 Sim(3) residual > 5 cm), and by 0.1 when
+    the depth-derived scale has a per-image spread (MAD / scale) above 2 %."""
+    c = _SCALE_BASE.get(scale_source, 0.0)
+    if alignment:
+        if alignment.get("prior_residual_p95_m", 0.0) > 0.05 and scale_source == "metric_priors":
+            c -= 0.2
+        ds = alignment.get("depth_scale") or {}
+        if ds.get("status") == "ok" and ds["mad"] / ds["scale"] > 0.02:
+            c -= 0.1
+    return float(np.clip(c, 0.0, 1.0))
 
 
 def run_room(
@@ -18,6 +36,7 @@ def run_room(
     out: Path,
     p: PlaneParams | None = None,
     scale_source: str = "unknown",
+    alignment: dict | None = None,
 ) -> dict:
     """`cloud`: fused cloud in the gravity-aligned world frame (+Z up, metres)."""
     p = p or PlaneParams()
@@ -55,6 +74,11 @@ def run_room(
         if src != "wall_intersections":
             notes.append(f"floor polygon from {src}: wall loop not closed or failed validation")
         fz, cz = lab["floor_z"], lab["ceiling_z"]
+        tilt, R_up = None, None
+        if lab["floor"] is not None:
+            nf = planes[lab["floor"]].normal
+            tilt = float(np.degrees(np.arccos(np.clip(nf[2], -1, 1))))
+            R_up = rotation_aligning(nf, np.array([0.0, 0.0, 1.0])).tolist()
         room = RoomModel(
             floor_polygon=poly.tolist(),
             floor_polygon_source=src,
@@ -65,11 +89,13 @@ def run_room(
             floor_id=lab["floor"],
             ceiling_id=lab["ceiling"],
             wall_ids=lab["walls"],
+            floor_tilt_deg=tilt,
+            R_floor_up=R_up,
             bbox_min=P.min(0).tolist(),
             bbox_max=P.max(0).tolist(),
             gravity_world=[0.0, 0.0, -1.0],
             scale_source=scale_source,
-            scale_confidence=None,
+            scale_confidence=scale_confidence(scale_source, alignment),
             notes=notes,
         )
         (out / "planes.json").write_text(pf.model_dump_json(indent=1))

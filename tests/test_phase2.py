@@ -110,21 +110,23 @@ def test_tum_refinement_vs_noisy_prior(tmp_path, seq):
 
 @pytest.mark.heavy
 @pytest.mark.parametrize(
-    "preset",
+    "preset,depth_scale",
     [
-        "vio_small",
+        ("vio_small", False),
         pytest.param(
             "vio_large",
+            False,
             marks=pytest.mark.xfail(
                 strict=False,
                 reason="KNOWN MISS (measured 2026-11-13): refined ATE_se3 2.63 cm > 2 cm. Shape is "
                 "fine (ATE_sim3 0.49 cm, rot 0.14 deg); scale inherited from 3%/m drifting priors "
-                "over a 23 m path (scale error 2.35%). Fix path: depth-based scale (Phase 3).",
+                "over a 23 m path (scale error 2.35%). Fixed by depth_scale=True (next case).",
             ),
         ),
+        ("vio_large", True),
     ],
 )
-def test_replica_refinement_vs_noisy_prior(tmp_path, preset):
+def test_replica_refinement_vs_noisy_prior(tmp_path, preset, depth_scale):
     root = DATA / "replica" / "room0"
     _need(root / "SUBSET.json")
     ws = ingest(
@@ -138,10 +140,12 @@ def test_replica_refinement_vs_noisy_prior(tmp_path, preset):
         noise_preset=preset,
         seed=0,
     )
-    r = refine(ws, tmp_path, max_image_size=640)
+    r = refine(ws, tmp_path, max_image_size=640, depth_scale=depth_scale)
     gt, pri, est = _load(ws)
     res = {
         "preset": preset,
+        "depth_scale": depth_scale,
+        "depth_scale_info": r.get("depth_scale"),
         "registered": r["registered"],
         "n_frames": r["n_frames"],
         "mean_reproj_px": r["mean_reproj_px"],
@@ -159,7 +163,7 @@ def test_replica_refinement_vs_noisy_prior(tmp_path, preset):
     res["scale_error"] = abs(res["refined"]["ate_sim3"]["scale"] - 1)
     meta = json.loads((tmp_path / "phase2" / "meta.json").read_text())
     res |= {"wall_time_s": meta["wall_time_s"], "peak_ram_mb": meta["peak_ram_mb"]}
-    _save(f"phase2_replica_room0_{preset}", res)
+    _save(f"phase2_replica_room0_{preset}{'_depthscale' if depth_scale else ''}", res)
     assert r["registered"] / r["n_frames"] >= 0.95
     assert res["ate_se3_reduction"] >= 0.5
     assert res["refined"]["ate_se3"]["rot_mean_deg"] < 0.5

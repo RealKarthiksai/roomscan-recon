@@ -13,6 +13,21 @@ import open3d as o3d
 from plyfile import PlyData
 
 
+def resolve_gt_path(path: str | Path, repo: Path | None = None) -> Path:
+    """gt_ref.json stores the GT path as it was at ingest time. If the repo moved, re-root the
+    part after `/data/` under this repo's data/ directory."""
+    p = Path(path)
+    if p.exists():
+        return p
+    repo = repo or Path(__file__).resolve().parents[1]
+    parts = p.parts
+    if "data" in parts:
+        cand = repo / "data" / Path(*parts[len(parts) - parts[::-1].index("data") :])
+        if cand.exists():
+            return cand
+    return p
+
+
 def load_mesh(path: Path) -> o3d.geometry.TriangleMesh:
     ply = PlyData.read(str(path))
     v = ply["vertex"]

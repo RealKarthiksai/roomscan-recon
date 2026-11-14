@@ -20,7 +20,35 @@ def _box(size, origin) -> o3d.geometry.TriangleMesh:
     return m
 
 
-def room_mesh() -> o3d.geometry.TriangleMesh:
+# L-shaped room: the 4.0 x 3.5 box with the corner x > 2.5, y > 2.0 removed (area 11.75 m²).
+L_OUTLINE = [(0, 0), (4.0, 0), (4.0, 2.0), (2.5, 2.0), (2.5, 3.5), (0, 3.5)]
+L_AREA = 4.0 * 3.5 - 1.5 * 1.5
+
+
+def _quad(mesh_v, mesh_t, p):
+    i = len(mesh_v)
+    mesh_v += p
+    mesh_t += [[i, i + 1, i + 2], [i, i + 2, i + 3]]
+
+
+def l_room_mesh() -> o3d.geometry.TriangleMesh:
+    """Closed L-shaped room (floor/ceiling as two rectangles each, six walls), height ROOM[2]."""
+    Lz = ROOM[2]
+    V, T = [], []
+    for z in (0.0, Lz):
+        for x0, x1, y0, y1 in [(0, 4.0, 0, 2.0), (0, 2.5, 2.0, 3.5)]:
+            _quad(V, T, [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]])
+    for k in range(len(L_OUTLINE)):
+        (ax, ay), (bx, by) = L_OUTLINE[k], L_OUTLINE[(k + 1) % len(L_OUTLINE)]
+        _quad(V, T, [[ax, ay, 0], [bx, by, 0], [bx, by, Lz], [ax, ay, Lz]])
+    return o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(np.array(V, float)), o3d.utility.Vector3iVector(np.array(T))
+    )
+
+
+def room_mesh(layout: str = "box") -> o3d.geometry.TriangleMesh:
+    if layout == "L":
+        return l_room_mesh()
     Lx, Ly, Lz = ROOM
     m = _box(ROOM, (0, 0, 0))
     m += _box((1.2, 0.8, 0.04), (1.0, 1.2, 0.72))  # table top: z in [0.72, 0.76]
@@ -62,9 +90,11 @@ def look(position, yaw_deg, pitch_deg) -> np.ndarray:
     return T
 
 
-def cameras(seed: int = 0) -> list[np.ndarray]:
+def cameras(seed: int = 0, layout: str = "box") -> list[np.ndarray]:
     rng = np.random.default_rng(seed)
     c = np.array([ROOM[0] / 2, ROOM[1] / 2, 1.4])
+    if layout == "L":
+        c = np.array([2.0, 1.75, 1.4])
     T = []
     for k, yaw in enumerate(np.arange(0, 360, 15.0)):
         pos = c + 0.6 * np.array([np.cos(np.radians(yaw)), np.sin(np.radians(yaw)), 0])
@@ -73,6 +103,13 @@ def cameras(seed: int = 0) -> list[np.ndarray]:
     for yaw in np.arange(0, 360, 45.0):
         T.append(look(c, yaw, -60.0))  # floor
         T.append(look(c, yaw + 22.5, 60.0))  # ceiling
+    if layout == "L":  # a second station in the short arm so both arms are seen head-on
+        c2 = np.array([1.25, 2.75, 1.4])
+        for yaw in np.arange(0, 360, 20.0):
+            T.append(look(c2 + rng.normal(0, 0.03, 3), yaw, (-15 if int(yaw / 20) % 2 else 15)))
+        for yaw in np.arange(0, 360, 90.0):
+            T.append(look(c2, yaw, -60.0))
+            T.append(look(c2, yaw + 45, 60.0))
     return T
 
 
@@ -86,6 +123,11 @@ def render_depth(scene, T_wc, K, W, H) -> np.ndarray:
     return np.where(np.isfinite(t), t * dirs_cam[..., 2], 0).astype(np.float32)
 
 
+def camera_model(W: int = 320, H: int = 240, f: float = 180.0):
+    K = np.array([[f, 0, W / 2 - 0.5], [0, f, H / 2 - 0.5], [0, 0, 1.0]])
+    return K, W, H
+
+
 def fused_cloud(
     seed: int = 0,
     noise_m: float = 0.003,
@@ -93,16 +135,17 @@ def fused_cloud(
     H: int = 240,
     f: float = 180.0,
     voxel: float = 0.02,
+    layout: str = "box",
 ) -> o3d.geometry.PointCloud:
     from spatial.fusion.tsdf import TSDF, TSDFParams
 
-    K = np.array([[f, 0, W / 2 - 0.5], [0, f, H / 2 - 0.5], [0, 0, 1.0]])
+    K, _, _ = camera_model(W, H, f)
     scene = o3d.t.geometry.RaycastingScene()
-    scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(room_mesh()))
+    scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(room_mesh(layout)))
     rng = np.random.default_rng(seed + 1)
     vol = TSDF(TSDFParams(voxel=voxel))
     rgb = np.full((H, W, 3), 128, np.uint8)
-    for T in cameras(seed):
+    for T in cameras(seed, layout):
         d = render_depth(scene, T, K, W, H)
         d = np.where(d > 0, d + rng.normal(0, noise_m, d.shape), 0).astype(np.float32)
         vol.integrate(d, rgb, K, T)

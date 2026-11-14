@@ -10,7 +10,7 @@ import numpy as np
 import open3d as o3d
 
 from eval.depth_metrics import aggregate, depth_metrics
-from eval.gt import load_mesh
+from eval.gt import load_mesh, resolve_gt_path
 from eval.recon_metrics import cull_to_cameras, recon_metrics, sample_mesh
 from spatial.geometry import umeyama
 from spatial.phase3 import load_poses as load_est_poses
@@ -52,7 +52,7 @@ def evaluate_phase3(
     # ---- 3D metrics ------------------------------------------------------------------------
     if gt_mesh is None:
         ref = json.loads((ws / "gt" / "gt_ref.json").read_text())
-        gt_mesh = Path(ref["geometry"]) if ref.get("geometry") else None
+        gt_mesh = resolve_gt_path(ref["geometry"]) if ref.get("geometry") else None
     if gt_mesh is not None and gt_mesh.suffix == ".ply":
         key = (str(gt_mesh), tuple(ids), W, H, n_gt, seed)
         if cache is not None and key in cache:

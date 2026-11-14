@@ -27,6 +27,7 @@ from spatial.depth.align import (
 )
 from spatial.depth.consistency import ConsistencyParams, consistency_mask, select_neighbours
 from spatial.depth.masks import MaskParams, build_mask
+from spatial.depth.mvs import MVSParams, load_mvs_depths, run_openmvs_depth
 from spatial.depth.sources import MonoDepth, SensorDepth
 from spatial.fusion.clean import CleanParams, clean
 from spatial.fusion.tsdf import TSDF, TSDFParams
@@ -35,7 +36,7 @@ from spatial.stage import record_stage, sha256_file
 
 @dataclass
 class Phase3Config:
-    depth_source: str = "auto"  # sensor | mono | auto
+    depth_source: str = "auto"  # sensor | mvs | mono | auto (sensor if present, else mvs)
     model: str = "small"
     model_kind: str = "metric"  # metric | relative
     input_size: int = 518
@@ -47,11 +48,13 @@ class Phase3Config:
     masks: bool = True
     consistency: bool = True
     pose_source: str = "refined"  # refined | gt (oracle only)
+    mvs_conf_min: float = 0.5  # OpenMVS confidence cutoff (TUM: 0.5 -> AbsRel 0.070, 63 % kept)
     seed: int = 0
     # Step F robustness: (translation sigma [m], rotation sigma [deg]) white noise per frame
     # added to the poses used for fusion/consistency/alignment. None = off.
     pose_noise: tuple[float, float] | None = None
     align_p: AlignParams = field(default_factory=AlignParams)
+    mvs_p: MVSParams = field(default_factory=MVSParams)
     mask_p: MaskParams = field(default_factory=MaskParams)
     cons_p: ConsistencyParams = field(default_factory=ConsistencyParams)
     tsdf_p: TSDFParams = field(default_factory=TSDFParams)
@@ -144,7 +147,7 @@ def run_phase3(ws: Path, out: Path, cfg: Phase3Config) -> dict:
         K = _scaled_K(K0, D)
         has_sensor = all(by_id[i].depth for i in ids)
         src = (
-            cfg.depth_source if cfg.depth_source != "auto" else ("sensor" if has_sensor else "mono")
+            cfg.depth_source if cfg.depth_source != "auto" else ("sensor" if has_sensor else "mvs")
         )
         if src == "sensor" and not has_sensor:
             raise ValueError("depth_source=sensor but workspace has no sensor depth")
@@ -180,6 +183,52 @@ def run_phase3(ws: Path, out: Path, cfg: Phase3Config) -> dict:
                     source="sensor", scale=1.0, shift=0.0, status="no_alignment"
                 )
             t["depth_source_ms_per_frame"] = (time.perf_counter() - t0) * 1e3 / len(ids)
+        elif src in ("mvs", "hybrid"):
+            mvs_dir = out / "mvs"
+            if not list(mvs_dir.glob("depth*.dmap")):
+                run_openmvs_depth(ws, mvs_dir, cfg.mvs_p, D)
+            raw = load_mvs_depths(mvs_dir, (W, H))
+            depth = {}
+            for i in ids:
+                d, c = raw.get(i, (np.zeros((H, W), np.float32), None))
+                if c is not None:
+                    d = np.where(c >= cfg.mvs_conf_min, d, 0).astype(np.float32)
+                depth[i] = d
+                frames_al[i] = FrameAlignment(
+                    source="mvs",
+                    scale=1.0,
+                    shift=0.0,
+                    status="no_alignment" if i in raw else "rejected_few_points",
+                )
+            model_info = DepthModelInfo(
+                name="openmvs", hf_id=None, revision=None, kind="mvs", licence="AGPL-3.0 (tool)"
+            )
+            t["mvs_s"] = time.perf_counter() - t0
+            if src == "hybrid":  # fill MVS holes with mono depth scale-aligned to MVS
+                mono = MonoDepth(cfg.model, "metric", cfg.device, cfg.input_size)
+                preds = dict(
+                    zip(ids, mono.predict([ws / by_id[i].image for i in ids]), strict=True)
+                )
+                rng = np.random.default_rng(cfg.seed)
+                filled = 0
+                for i in ids:
+                    d = depth[i]
+                    pm = cv2.resize(preds[i], (W, H), interpolation=cv2.INTER_LINEAR)
+                    ys, xs = np.nonzero(d > 0)
+                    if len(ys) < 200:
+                        continue
+                    sel = rng.choice(len(ys), min(3000, len(ys)), replace=False)
+                    fit = fit_scale(
+                        d[ys[sel], xs[sel]], pm[ys[sel], xs[sel]], "metric", cfg.align_p
+                    )
+                    if fit["status"] != "ok":
+                        continue
+                    hole = d == 0
+                    d = d.copy()
+                    d[hole] = (pm * fit["scale"])[hole]
+                    filled += int(hole.sum())
+                    depth[i] = d.astype(np.float32)
+                rec.metrics["hybrid_filled_px"] = filled
         else:
             mono = MonoDepth(cfg.model, cfg.model_kind, cfg.device, cfg.input_size)
             preds = dict(zip(ids, mono.predict([ws / by_id[i].image for i in ids]), strict=True))

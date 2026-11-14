@@ -116,7 +116,7 @@ class StageMeta(Strict):
 
 
 class FrameAlignment(Strict):
-    source: Literal["sensor", "mono"]
+    source: Literal["sensor", "mono", "mvs"]
     scale: float | None
     shift: float | None
     scale_smoothed: float | None = None
@@ -130,7 +130,7 @@ class DepthModelInfo(Strict):
     name: str
     hf_id: str | None
     revision: str | None
-    kind: Literal["metric", "relative", "inverse_relative", "sensor"]
+    kind: Literal["metric", "relative", "inverse_relative", "sensor", "mvs"]
     licence: str
 
 
@@ -177,7 +177,7 @@ class RoomModel(Strict):
     floor_polygon: list[list[float]] = Field(
         description="2D (x, y) polygon in world frame, counter-clockwise, metres"
     )
-    floor_polygon_source: Literal["wall_intersections", "floor_hull", "none"]
+    floor_polygon_source: Literal["wall_intersections", "footprint_contour", "floor_hull", "none"]
     floor_area_m2: float | None
     floor_z: float | None
     ceiling_z: float | None
@@ -185,11 +185,86 @@ class RoomModel(Strict):
     floor_id: int | None
     ceiling_id: int | None
     wall_ids: list[int]
+    floor_tilt_deg: float | None = Field(
+        None, description="angle between the floor normal and +Z (residual gravity error)"
+    )
+    R_floor_up: list[list[float]] | None = Field(
+        None, description="rotation taking the floor normal to +Z; NOT applied to the data"
+    )
     bbox_min: list[float]
     bbox_max: list[float]
     gravity_world: list[float] = Field(description="unit vector pointing down")
     scale_source: Literal["metric_priors", "sensor_depth", "synthetic", "unknown"]
     scale_confidence: float | None = Field(
-        None, ge=0, le=1, description="null until a scale-confidence estimator exists"
+        None,
+        ge=0,
+        le=1,
+        description="HEURISTIC trust in the metric scale (not a calibrated probability); see "
+        "spatial.room.run.scale_confidence",
     )
     notes: list[str] = []
+
+
+# ---- Phase 6: SpatialMap (Part 3 -> Part 4 hand-over) -----------------------------------
+
+
+class StageSummary(Strict):
+    status: Literal["ok", "failed", "partial"]
+    wall_time_s: float
+    peak_ram_mb: float
+    device: str
+
+
+class SpatialMapManifest(Strict):
+    format: Literal["room.spatial_map"] = "room.spatial_map"
+    version: str = FORMAT_VERSION
+    created: str
+    source: dict = Field(description="dataset / scene / source_path from workspace_meta.json")
+    frame_ids: list[str]
+    files: dict[str, str] = Field(description="relative path -> sha256 of every file but this one")
+    stages: dict[str, StageSummary]
+    params: dict
+    versions: dict[str, str]
+    conventions: dict[str, str]
+
+
+class CamerasFile(Strict):
+    version: str = FORMAT_VERSION
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    intrinsics: Intrinsics
+    depth_width: int = Field(gt=0)
+    depth_height: int = Field(gt=0)
+    depth_intrinsics: Intrinsics
+    pose_source: str
+    metric: bool
+    gravity_aligned: bool
+    frames: dict[str, Mat4] = Field(description="frame id -> T_world_camera (refined)")
+
+    @field_validator("frames")
+    @classmethod
+    def _rigid_frames(cls, v):
+        for m in v.values():
+            _check_rigid(m)
+        return v
+
+
+class SpatialQuality(Strict):
+    version: str = FORMAT_VERSION
+    n_frames: int
+    registered: int
+    reg_ratio: float
+    mean_reproj_px: float | None
+    scale_source: str
+    scale_confidence: float | None
+    depth_source: str
+    depth_valid_fraction: float
+    n_points: int
+    n_planes: int
+    n_walls: int
+    wall_floor_max_dev_deg: float | None
+    floor_tilt_deg: float | None
+    ceiling_height_m: float | None
+    floor_area_m2: float | None
+    floor_polygon_source: str
+    warnings: list[str]

@@ -126,3 +126,43 @@ def test_replica_room0_real_cloud(tmp_path):
     assert len(dev) >= 4 and max(dev) <= 3.0  # HANDOFF P5 real-data check: floor ⟂ wall
     assert abs(p.ceiling_height_m - q.ceiling_height_m) <= 0.02
     assert abs(p.floor_area_m2 - q.floor_area_m2) / q.floor_area_m2 <= 0.03
+
+
+@pytest.mark.light
+def test_l_shaped_room_polygon_and_fields(tmp_path):
+    """A 4x3.5 m box with a 1.5x1.5 m corner removed: one-line-per-direction walls cannot
+    describe it; the footprint contour must (area <= 3 % off, every GT corner within 8 cm)."""
+    from eval.synthetic_room import L_AREA, L_OUTLINE
+
+    o3d.io.write_point_cloud(str(tmp_path / "l.ply"), fused_cloud(seed=0, layout="L"))
+    r = run_room(tmp_path / "l.ply", tmp_path / "p5", scale_source="synthetic")
+    room = r["room"]
+    poly = np.asarray(room.floor_polygon)
+    corner_err = [float(np.min(np.linalg.norm(poly - np.asarray(c), axis=1))) for c in L_OUTLINE]
+    vals = {
+        "source": room.floor_polygon_source,
+        "n_corners": len(poly),
+        "area_m2": room.floor_area_m2,
+        "area_rel_err": abs(room.floor_area_m2 - L_AREA) / L_AREA,
+        "corner_err_m": corner_err,
+        "n_walls": r["metrics"]["labels"]["wall"],
+        "floor_tilt_deg": room.floor_tilt_deg,
+        "scale_confidence": room.scale_confidence,
+    }
+    _save("synthetic_L", vals)
+    assert room.floor_polygon_source == "footprint_contour"
+    assert vals["area_rel_err"] <= 0.03 and max(corner_err) <= 0.08
+    assert vals["n_walls"] == 6
+    assert room.floor_tilt_deg is not None and room.floor_tilt_deg < 1.0
+    assert np.allclose(np.asarray(room.R_floor_up) @ np.asarray(room.R_floor_up).T, np.eye(3))
+
+
+@pytest.mark.light
+def test_scale_confidence_heuristic():
+    from spatial.room.run import scale_confidence
+
+    assert scale_confidence("unknown") == 0.0
+    assert scale_confidence("sensor_depth") > scale_confidence("metric_priors") > 0
+    assert scale_confidence("metric_priors", {"prior_residual_p95_m": 0.2}) < scale_confidence(
+        "metric_priors", {"prior_residual_p95_m": 0.01}
+    )

@@ -86,10 +86,17 @@ RUNS = {
     "R4": replace(BASE, depth_source="mono", align=True, masks=True, consistency=False),
     "R5": replace(BASE, depth_source="mono", align=True, masks=True, consistency=True),
     "R6": replace(BASE, depth_source="sensor", masks=True, consistency=True),
+    # Phase 3 completion: no depth sensor, OpenMVS multi-view depth (CPU docker)
+    "R7": replace(BASE, depth_source="mvs", masks=True, consistency=True),
+    "R8": replace(BASE, depth_source="hybrid", masks=True, consistency=True),
 }
 
 
 def _hash(obj) -> str:
+    obj = dict(obj)
+    if obj.get("depth_source") not in ("mvs", "hybrid"):  # keep caches of pre-MVS runs valid
+        obj.pop("mvs_p", None)
+        obj.pop("mvs_conf_min", None)
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 import open3d as o3d
 from scipy.spatial import ConvexHull
@@ -36,6 +37,11 @@ class PlaneParams:
     min_wall_area_m2: float = 0.8
     min_wall_height_frac: float = 0.5  # of floor->ceiling distance (or 1.0 m if unknown)
     wall_cluster_deg: float = 20.0  # walls this parallel (same facing) form one direction
+    footprint_cell_m: float = 0.03  # top-down occupancy grid for the floor outline
+    footprint_close_m: float = 0.30  # closes gaps in the wall ring (unseen / occluded wall)
+    footprint_band_m: float = 0.30  # ignore points this close to floor / ceiling (TSDF smear)
+    footprint_simplify_m: float = 0.05  # Douglas-Peucker tolerance
+    footprint_accept_iou: float = 0.97  # wall-intersection polygon kept if IoU >= this
     wall_top_tol_m: float = 0.35  # with a ceiling: wall inliers must reach ceiling_z - tol
     seed: int = 0
 
@@ -236,6 +242,56 @@ def dominant_walls(P, planes, walls: list[int], p: PlaneParams) -> list[int]:
     return sorted(keep)
 
 
+def _raster_poly(poly: np.ndarray, x0: float, y0: float, cell: float, shape) -> np.ndarray:
+    m = np.zeros(shape, np.uint8)
+    px = np.round((poly - [x0, y0]) / cell - 0.5).astype(np.int32)
+    cv2.fillPoly(m, [px.reshape(-1, 1, 2)], 1)
+    return m.astype(bool)
+
+
+def footprint_polygon(P, lab, p: PlaneParams):
+    """Floor outline from the top-down occupancy of *vertical* structure (points between
+    `footprint_band_m` above the floor and below the ceiling: walls, furniture). Floor and
+    ceiling surfaces are excluded because TSDF fusion smears them a few cm past the walls.
+    The wall ring is closed morphologically, the exterior flood-filled, and the interior
+    contoured: this captures recesses and bays that one-line-per-direction walls cannot.
+    Returns (polygon (N,2) CCW | None, (x0, y0, cell, shape)). None when the ring does not
+    close (the interior then leaks), so callers fall back to the wall-intersection polygon."""
+    if lab["floor_z"] is None:
+        return None, None
+    lo = lab["floor_z"] + p.footprint_band_m
+    hi = (lab["ceiling_z"] - p.footprint_band_m) if lab["ceiling_z"] is not None else np.inf
+    Q = P[(P[:, 2] >= lo) & (P[:, 2] <= hi), :2]
+    if len(Q) < 200:
+        return None, None
+    cell = p.footprint_cell_m
+    x0, y0 = Q.min(0) - 6 * cell
+    ij = np.floor((Q - [x0, y0]) / cell).astype(int)
+    shape = (ij[:, 1].max() + 7, ij[:, 0].max() + 7)
+    cnt = np.zeros(shape, np.int32)
+    np.add.at(cnt, (ij[:, 1], ij[:, 0]), 1)
+    occ = (cnt >= 2).astype(np.uint8)
+    k = int(round(p.footprint_close_m / cell)) | 1
+    occ = cv2.morphologyEx(occ, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    ff = occ.copy()
+    mask = np.zeros((shape[0] + 2, shape[1] + 2), np.uint8)
+    cv2.floodFill(ff, mask, (0, 0), 2)  # exterior = 2
+    interior = (ff != 2).astype(np.uint8)  # walls + enclosed floor
+    n, lbl, st, _ = cv2.connectedComponentsWithStats(interior, connectivity=8)
+    if n < 2:
+        return None, None
+    interior = (lbl == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
+    cs, _ = cv2.findContours(interior, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    c = max(cs, key=cv2.contourArea)
+    c = cv2.approxPolyDP(c, p.footprint_simplify_m / cell, True).reshape(-1, 2).astype(float)
+    poly = np.c_[x0 + (c[:, 0] + 0.5) * cell, y0 + (c[:, 1] + 0.5) * cell]
+    if len(poly) < 3:
+        return None, None
+    if _shoelace(poly) < 0:
+        poly = poly[::-1]
+    return poly, (x0, y0, cell, shape)
+
+
 def floor_polygon(P, planes, lab, p: PlaneParams, min_corner_angle_deg: float = 30.0):
     """2D CCW floor polygon. Primary: intersect consecutive dominant-wall lines (ordered by the
     angle of their inlier centroid around the room centre; near-parallel neighbours are
@@ -273,7 +329,21 @@ def floor_polygon(P, planes, lab, p: PlaneParams, min_corner_angle_deg: float = 
             if ok and hull_area is not None:
                 ok = 0.7 * hull_area <= area <= 1.6 * hull_area
             if ok:
-                return poly, area, "wall_intersections"
+                foot, grid = footprint_polygon(P, lab, p)
+                if foot is not None and not (0.5 * hull_area <= _shoelace(foot) <= 1.3 * hull_area):
+                    foot = None  # ring leaked or footprint implausible
+                if foot is None:
+                    return poly, area, "wall_intersections"
+                x0, y0, cell, shape = grid
+                try:
+                    a = _raster_poly(poly, x0, y0, cell, shape)
+                except cv2.error:
+                    a = np.zeros(shape, bool)
+                b = _raster_poly(foot, x0, y0, cell, shape)
+                iou = float((a & b).sum() / max(1, (a | b).sum()))
+                if iou >= p.footprint_accept_iou:
+                    return poly, area, "wall_intersections"
+                return foot, _shoelace(foot), "footprint_contour"
     if hull_poly is not None:
         poly = hull_poly if _shoelace(hull_poly) > 0 else hull_poly[::-1]
         return poly, _shoelace(poly), "floor_hull"
