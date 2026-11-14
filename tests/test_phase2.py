@@ -66,6 +66,39 @@ def test_eth3d_sfm_only(tmp_path):
 
 
 @pytest.mark.heavy
+@pytest.mark.xfail(
+    strict=False,
+    reason="KNOWN MISS (measured 2026-11-14): pycolmap 4.2.1 global mapper registers 26/26 at 0.51 px "
+    "but returns a geometrically wrong model on ETH3D office (Sim(3) residual 3.6 m vs the "
+    "incremental model over a 10 m extent, rotation error ~177 deg, ATE median 0.41 m). "
+    "mapper='global' is experimental; 'incremental' stays the default.",
+)
+def test_eth3d_global_mapper(tmp_path):
+    """P2-04: COLMAP 4 global mapper (GLOMAP) on the same input as test_eth3d_sfm_only. Same
+    acceptance; the incremental numbers are in phase2_eth3d.json for comparison."""
+    root = DATA / "eth3d" / "office"
+    _need(root)
+    ws = ingest("eth3d", root, tmp_path, downscale=4, prior="none")
+    r = refine(ws, tmp_path, max_image_size=1600, matcher="exhaustive", mapper="global")
+    gt, _, est = _load(ws)
+    a = ate(est, gt, "sim3")
+    meta = json.loads((tmp_path / "phase2" / "meta.json").read_text())
+    _save(
+        "phase2_eth3d_global",
+        {
+            "refine": {k: r[k] for k in ("registered", "n_frames", "mean_reproj_px", "n_points3D")},
+            "ate_sim3": a,
+            "wall_time_s": meta["wall_time_s"],
+            "peak_ram_mb": meta["peak_ram_mb"],
+        },
+    )
+    assert r["registered"] / r["n_frames"] >= 0.95
+    assert r["mean_reproj_px"] < 1.0
+    assert a["median_m"] < 0.02
+    assert a["rot_mean_deg"] < 0.5
+
+
+@pytest.mark.heavy
 @pytest.mark.parametrize("seq", ["rgbd_dataset_freiburg1_xyz", "rgbd_dataset_freiburg1_desk"])
 def test_tum_refinement_vs_noisy_prior(tmp_path, seq):
     root = DATA / "tum" / seq

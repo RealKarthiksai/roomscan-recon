@@ -55,6 +55,9 @@ def refine(
     depth_scale: Annotated[
         bool, typer.Option(help="correct the metric scale from sensor depth (needs depth/)")
     ] = False,
+    mapper: Annotated[str, typer.Option(help="incremental | global (COLMAP global mapper)")] = (
+        "incremental"
+    ),
 ):
     """Phase 2: pose refinement -> metric, gravity-aligned sparse/0."""
     from spatial.sfm.refine import refine as _refine
@@ -66,6 +69,7 @@ def refine(
         matcher=matcher,
         prior_mode=prior_mode,
         depth_scale=depth_scale,
+        mapper=mapper,
     )
     typer.echo(
         json.dumps({k: v for k, v in r.items() if not k.startswith(("sim3_R", "R_"))}, default=str)

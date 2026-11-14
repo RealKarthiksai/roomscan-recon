@@ -38,6 +38,18 @@ def gt_cloud_in_gt_frame(scan_dir: Path, voxel: float = 0.01) -> o3d.geometry.Po
     return total
 
 
+def write_xyz_f32_ply(points: np.ndarray, path: Path) -> None:
+    """The ETH3D tool's PCL reader only scores correctly on a plain float32 x,y,z PLY: Open3D's
+    default layout (double coordinates, normals, colours) makes every metric 0 without an error
+    (found by testing; see tests/test_eth3d_tool.py)."""
+    from plyfile import PlyData, PlyElement
+
+    q = np.asarray(points, np.float32)
+    e = np.empty(len(q), dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4")])
+    e["x"], e["y"], e["z"] = q.T
+    PlyData([PlyElement.describe(e, "vertex")], text=False).write(str(path))
+
+
 def run_eth3d_eval(
     recon_ply: Path,
     scan_dir: Path,
@@ -47,6 +59,15 @@ def run_eth3d_eval(
     """Returns {"tolerances": [...], "completeness": [...], "accuracy": [...], "fscore": [...],
     "raw": stdout}. Parsed from the tool's stdout."""
     recon_ply, scan_dir = recon_ply.resolve(), scan_dir.resolve()
+    clean = recon_ply.with_name(recon_ply.stem + ".f32xyz.ply")
+    write_xyz_f32_ply(np.asarray(o3d.io.read_point_cloud(str(recon_ply)).points), clean)
+    try:
+        return _run(clean, scan_dir, tolerances, timeout)
+    finally:
+        clean.unlink(missing_ok=True)
+
+
+def _run(recon_ply: Path, scan_dir: Path, tolerances, timeout: int) -> dict:
     work = recon_ply.parent
     cmd = [
         "docker",

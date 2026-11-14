@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import cv2
@@ -12,6 +13,7 @@ from scipy.spatial.transform import Rotation
 from formats.models import FramePrior, Intrinsics, PoseNoise, Priors, WorkspaceMeta
 from spatial.geometry import rotation_aligning
 from spatial.io.adapters import ADAPTER_VERSION, LOADERS, SourceDataset
+from spatial.io.keyframes import KeyframeParams, select_keyframes, sharpness
 from spatial.stage import record_stage, sha256_file
 
 NOISE_PRESETS = {
@@ -70,6 +72,7 @@ def ingest(
     prior: str = "gt",
     noise_preset: str = "vio_small",
     seed: int = 0,
+    keyframes: KeyframeParams | None = None,
 ) -> Path:
     params = dict(
         dataset=dataset,
@@ -80,11 +83,14 @@ def ingest(
         prior=prior,
         noise_preset=noise_preset,
         seed=seed,
+        keyframes=None if keyframes is None else asdict(keyframes),
     )
     ws = out / "workspace"
     with record_stage("phase1_ingest", out / "phase1", params=params) as rec:
         ds = LOADERS[dataset](src)
-        frames = ds.frames[::stride][:max_frames]
+        frames = ds.frames[::stride]
+        if keyframes is None:
+            frames = frames[:max_frames]
         if not frames:
             raise ValueError("no frames selected")
         maps, K = _undistort_maps(ds)
@@ -109,6 +115,13 @@ def ingest(
             pose_source = "dataset_gt_noisy"
         else:
             T_prior, pose_source = [None] * len(frames), "none"
+
+        if keyframes is not None:  # sharpness + motion-group selection on the PRIOR poses
+            sharp = np.array([sharpness(f.rgb) for f in frames])
+            sel = select_keyframes(sharp, T_prior, keyframes)[:max_frames]
+            frames = [frames[i] for i in sel]
+            T_gt = [T_gt[i] for i in sel]
+            T_prior = [T_prior[i] for i in sel]
 
         fp = []
         for f, Tp in zip(frames, T_prior, strict=True):

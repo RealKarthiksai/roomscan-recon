@@ -86,7 +86,11 @@ def refine(
     seed: int = 0,
     sim3_max_error_m: float = 0.10,
     depth_scale: bool = False,
+    mapper: str = "incremental",
 ) -> dict:
+    """`mapper`: "incremental" (default) or "global" (COLMAP 4 integrated GLOMAP global mapper)."""
+    if mapper not in ("incremental", "global"):
+        raise ValueError(f"mapper must be incremental|global, got {mapper!r}")
     pri = Priors.model_validate_json((ws / "priors.json").read_text())
     # prior_mode: "sim3" = pure SfM, then robust Sim(3) to priors (priors don't bend the
     #             trajectory); "ba" = additionally use prior positions inside BA.
@@ -98,6 +102,7 @@ def refine(
         seed=seed,
         sim3_max_error_m=sim3_max_error_m,
         depth_scale=depth_scale,
+        mapper=mapper,
     )
     with record_stage("phase2_refine", run / "phase2", params=params) as rec:
         work = run / "phase2" / "colmap"
@@ -172,10 +177,14 @@ def refine(
         if raw_dir.exists():
             shutil.rmtree(raw_dir)
         raw_dir.mkdir(parents=True)
-        models = pycolmap.incremental_mapping(db_path, ws / "images", raw_dir, options=opts)
+        if mapper == "global":
+            gopts = pycolmap.GlobalPipelineOptions()
+            models = pycolmap.global_mapping(db_path, ws / "images", raw_dir, gopts)
+        else:
+            models = pycolmap.incremental_mapping(db_path, ws / "images", raw_dir, options=opts)
         if not models:
             rec.status = "failed"
-            rec.notes.append("incremental mapping produced no model")
+            rec.notes.append(f"{mapper} mapping produced no model")
             return {"status": "failed"}
         model = max(models.values(), key=lambda r: r.num_reg_images())
         rec.metrics["model_sizes"] = sorted(
