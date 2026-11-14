@@ -24,9 +24,10 @@ from spatial.geometry import umeyama  # noqa: E402  (test-only alignment of SfM 
 ROOT = Path(__file__).resolve().parents[1]
 WS = ROOT / "runs/dev_p2_eth3d_office/workspace"
 SCAN = ROOT / "data/eth3d/office/dslr_scan_eval"
-OUT = ROOT / "runs/dev_p8_eth3d"
+OUT = ROOT / "runs/dev_p8_eth3d"  # all images: geometry scored with the ETH3D tool
+OUT_HELD = ROOT / "runs/dev_p8_eth3d_heldout"  # every 5th image removed: texture PSNR
 RESULTS = ROOT / "runs/test_results"
-LEVEL = 1  # images at 1/2 resolution
+LEVEL = 0  # full workspace resolution (1555 x 1036)
 
 
 def _sim3_to_gt() -> tuple[float, np.ndarray, np.ndarray]:
@@ -57,13 +58,17 @@ def test_eth3d_dense_mesh_texture(request):
     scene = SparseScene.from_workspace(WS)
     names = sorted(p.name for p in (WS / "images").glob("*.jpg"))
     train, held = split_names(names, 5)
-    if not (OUT / "mesh" / "mesh.glb").exists():
-        run = run_dense_mesh_texture(scene, OUT, DenseParams(resolution_level=LEVEL), train)
+    if not (OUT / "run.json").exists():  # geometry run: every image
+        run = run_dense_mesh_texture(scene, OUT, DenseParams(resolution_level=LEVEL), None)
         (OUT / "run.json").write_text(json.dumps(run, indent=1, default=str))
     run = json.loads((OUT / "run.json").read_text())
+    if not (OUT_HELD / "run.json").exists():  # texture run: held-out images excluded
+        runh = run_dense_mesh_texture(scene, OUT_HELD, DenseParams(resolution_level=LEVEL), train)
+        (OUT_HELD / "run.json").write_text(json.dumps(runh, indent=1, default=str))
+    run_held = json.loads((OUT_HELD / "run.json").read_text())
 
     s, R, t = _sim3_to_gt()
-    res = {"sim3_scale": float(s), "n_train": len(train), "n_heldout": len(held), "run": run}
+    res = {"sim3_scale": float(s), "n_train": len(train), "n_heldout": len(held), "run": run}  # noqa: E501
     for tag, path in [("dense", OUT / "dense/scene_dense.ply"), ("mesh", OUT / "mesh/mesh.ply")]:
         if tag == "dense":
             pts = np.asarray(o3d.io.read_point_cloud(str(path)).points)
@@ -75,8 +80,11 @@ def test_eth3d_dense_mesh_texture(request):
         o3d.io.write_point_cloud(str(ply), p)
         res[tag] = run_eth3d_eval(ply, SCAN)
         ply.unlink()  # reproducible from the outputs; saves disk
-    obj = OUT / run["outputs"]["textured_obj"]
-    res["heldout"] = heldout_render_metrics(obj, scene, held, 1 / 2**LEVEL, OUT / "heldout_renders")
+    res["run_heldout"] = run_held
+    obj = OUT_HELD / run_held["outputs"]["textured_obj"]
+    res["heldout"] = heldout_render_metrics(
+        obj, scene, held, 1 / 2**LEVEL, OUT_HELD / "heldout_renders"
+    )
     (RESULTS / "phase8_eth3d.json").write_text(json.dumps(res, indent=1, default=str))
     f5 = lambda r: r["fscore"][r["tolerances"].index(0.05)]  # noqa: E731
     assert f5(res["dense"]) >= 0.70, res["dense"]["fscore"]

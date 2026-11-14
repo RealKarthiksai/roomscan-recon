@@ -21,14 +21,19 @@ def split_names(names: list[str], every: int = 5) -> tuple[list[str], list[str]]
 
 
 def heldout_render_metrics(
-    textured: Path, scene: SparseScene, held_names: list[str], image_scale: float, out: Path | None
+    textured: Path,
+    scene: SparseScene,
+    held_names: list[str],
+    image_scale: float,
+    out: Path | None,
+    v_up: bool = False,  # OpenMVS TextureMesh OBJ: v measured from the top (see recon/render.py)
 ) -> dict:
     """PSNR/SSIM per held-out view. `psnr_covered` is over pixels the mesh covers; `coverage`
     is the covered fraction; `psnr_all` fills uncovered pixels with black. All three are
     reported so a mesh cannot score well by covering almost nothing."""
     import torch
 
-    mesh = TexturedMesh(textured)
+    mesh = TexturedMesh(textured, v_up=v_up)
     rec = pycolmap.Reconstruction(scene.model_dir)
     by_name = {im.name: im for im in rec.images.values()}
     rows = []

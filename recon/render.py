@@ -35,7 +35,11 @@ def _bilinear(tex: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 class TexturedMesh:
-    def __init__(self, obj_or_glb: Path):
+    def __init__(self, obj_or_glb: Path, v_up: bool = True):
+        """`v_up=True`: standard OBJ/MTL convention (v = 0 at the bottom of the image).
+        OpenMVS TextureMesh output needs `v_up=False` (measured: sampling it as v-up puts 95 % of
+        face centroids on black texels, v-down 24 %; held-out PSNR confirms, see test_phase8)."""
+        self.v_up = v_up
         sc = trimesh.load(str(obj_or_glb), process=False, force="scene")
         self.parts: list[_Part] = []
         self.scene = o3d.t.geometry.RaycastingScene()
@@ -85,7 +89,7 @@ class TexturedMesh:
             uv = (part.uv[f] * w[..., None]).sum(1)
             h_, w_ = part.tex.shape[:2]
             x = uv[:, 0] * w_ - 0.5
-            y = (1 - uv[:, 1]) * h_ - 0.5
+            y = ((1 - uv[:, 1]) if self.v_up else uv[:, 1]) * h_ - 0.5
             samp = _bilinear(part.tex, x, y)
             rgb[sel] = samp
         return rgb, hit, depth

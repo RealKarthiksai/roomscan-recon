@@ -7,11 +7,19 @@ GPU/ARKitScenes work is listed under "Pending for the GPU test machine".
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Environment, pinned deps, Docker tools, env acceptance tests | done, except GPU tests (pending) |
-| 1 | Dataset adapters → workspace (`images/ depth/ priors.json gt/`) | done (Replica, TUM, ETH3D) |
-| 2 | Pose refinement → metric, gravity-aligned `sparse/0` | done; 1 documented known miss |
-| 3 | Depth sources, alignment, masks, consistency, TSDF fusion + benchmarks | in progress |
-| 5 | Planes + room shell (`spatial/room/`, HANDOFF P5) | done on synthetic + Replica; ETH3D check blocked (no gravity) |
-| 6+ | SpatialMap writer (P6), Part 4 reconstruction | not started |
+| 1 | Dataset adapters, keyframe selection → workspace | done (Replica, TUM, ETH3D); Scan Bundle adapter blocked (no spec) |
+| 2 | Pose refinement → metric, gravity-aligned `sparse/0` | done; depth-based scale added; global mapper experimental (documented miss) |
+| 3 | Depth sources (sensor, OpenMVS, hybrid, mono), alignment, masks, consistency, TSDF fusion | done; mono is fallback only (documented) |
+| 4 | Fusion evaluation | synthetic Chamfer + Replica done; ETH3D official-tool score see Phase 8 |
+| 5 | Planes + room shell (box and L-shaped rooms) | done |
+| 6 | SpatialMap writer/reader, schemas, `spatial.cli run` | done |
+| 7 | Part 4 sparse hand-over to OpenMVS | done |
+| 8 | OpenMVS dense + mesh + texture, ETH3D scoring, held-out PSNR | implemented; ETH3D targets see "Phase 8 evidence" |
+| 9 | Gaussian-splat worker | written, **never executed (needs CUDA)**; CPU parts tested |
+| 10 | Reconstruction packaging, manifest, `recon.cli run` | done; splat recorded as `skipped` without CUDA |
+
+Reports with the exact measured numbers: `docs/PHASE_REPORTS/` (regenerate with
+`python scripts/render_phase_reports.py`). Plan: `docs/PLAN.md`. Formats: `docs/INTERFACES.md`.
 
 ## Phase 0 evidence (2026-11-12, CPU)
 
@@ -68,7 +76,39 @@ Known issues:
 - Floor polygon uses one dominant wall per direction; recesses/bays (room0 has two) are approximated. The GT-mesh comparison is self-consistency, not an independent layout GT.
 - `scale_confidence` is null (no estimator yet).
 
+## Phase 3-7 evidence (2026-11-14, CPU)
+
+| Check | Result (target) |
+|---|---|
+| OpenMVS depth vs Kinect, TUM xyz, conf ≥ 0.5 | AbsRel 0.070 (≤ 0.10), δ<1.25 0.935 (≥ 0.90), 63 % pixels kept. Unfiltered: AbsRel 0.130, **misses** |
+| Replica room0 F@5cm: sensor R1 / OpenMVS R7 / hybrid R8 / best mono R5 | 0.946 / 0.617 / 0.610 / 0.338 |
+| Scale recovery of a model deliberately scaled ×0.37 | TUM 1.3 %, Replica 0.7 % (≤ 2 %) |
+| Replica vio_large with `--depth-scale` | ATE SE3 2.63 → 0.47 cm, scale error 2.35 → 0.05 % (the old miss stays as xfail without the flag) |
+| Synthetic room TSDF Chamfer-L1 | 0.98 cm (≤ 1 cm): voxel-limited, close to the bar |
+| L-shaped synthetic room (bay case) | area error 0.46 %, max corner error 4.5 cm, 6 walls, polygon from footprint contour |
+| TUM desk keyframes (99 of 594) | max gap 0.244 m / 13.1° (≤ 0.3 m / 15°); mean sharpness 901 vs 212 for uniform sampling |
+| SpatialMap end-to-end Replica (one function call) | 40/40 registered, ceiling 2.7276 m (GT mesh 2.7279), all hashes verify, ~20 s of stages |
+| Downstream determinism (24 files) | byte-identical across two runs |
+| P7 ETH3D sparse | 26/26 registered, 0.466 px, OpenMVS loads 26 images + 1470 points |
+| ETH3D scoring tool E8 | self-score F = 1.0; a 20 cm shifted copy 0.20 @1 cm / 0.42 @5 cm |
+
 ## Decisions and findings log
+
+- **ETH3D tool pitfall (found 2026-11-14):** it silently scores 0 on Open3D-written PLYs (double
+  coordinates / normals / colours). `eval/eth3d.py` converts to a float32 x,y,z PLY first. The
+  first full-scan self-test (16 min) returned 0 because of this; tiny cropped-scan tests found it.
+- **OpenMVS texture OBJ uses a v-down convention** (95 % of face centroids on black texels if
+  sampled v-up, 24 % v-down): `recon/render.py` has `v_up`; `recon.evaluate` uses `v_up=False`.
+  The GLB written by trimesh inherits the OBJ's uv as parsed: **not verified in a standard viewer**.
+- **pycolmap 4.x:** images are deregistered through `deregister_frame`; the global mapper
+  (`refine --mapper global`) registers 26/26 on ETH3D office but returns a wrong model (3.6 m
+  residual vs incremental): experimental, incremental stays default.
+- **OpenMVS licence is AGPL-3.0:** only called as a separate process (docker); see docs/MODELS.md.
+- The benchmark workspaces store absolute GT paths from before the repo move;
+  `eval.gt.resolve_gt_path` re-roots them under this repo's `data/`.
+- Docker shares the 110 GB volume: the PCL-based ETH3D image is 4.2 GB. At 98 % disk usage keep
+  runs small; `docker builder prune` would free ~8 GB of build cache (not done: it also holds
+  other projects' layers).
 
 - **Replica meshes have quad faces**; open3d 0.19's PLY reader silently keeps only triangles
   (16,516 of 953,647 faces). `eval/gt.py` loads with plyfile and splits quads.
