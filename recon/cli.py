@@ -20,11 +20,20 @@ def run(
     splat_steps: int = 7000,
     heldout_every: Annotated[int, typer.Option(help="0 = no held-out images")] = 8,
     refine: Annotated[bool, typer.Option(help="OpenMVS RefineMesh (slow on CPU)")] = False,
+    max_threads: Annotated[int, typer.Option(help="OpenMVS threads (fewer = less RAM)")] = 4,
+    memory_gb: Annotated[
+        float | None, typer.Option(help="cap each OpenMVS container (RAM+swap, GB)")
+    ] = None,
 ):
     from recon.dense import DenseParams
     from recon.package import run_reconstruction
 
-    d = DenseParams(resolution_level=resolution_level, refine=refine)
+    d = DenseParams(
+        resolution_level=resolution_level,
+        refine=refine,
+        max_threads=max_threads,
+        memory_gb=memory_gb,
+    )
     r = run_reconstruction(
         spatial_map, out, d, splat=splat, splat_steps=splat_steps, heldout_every=heldout_every
     )

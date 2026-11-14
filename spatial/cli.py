@@ -188,9 +188,13 @@ def run(
     seed: int = 0,
     depth_scale: Annotated[bool, typer.Option(help="scale from sensor depth")] = False,
     phase3_downscale: int = 2,
+    keyframes: Annotated[
+        bool, typer.Option(help="select sharp, well-spread keyframes instead of a plain stride")
+    ] = False,
 ):
     """Phases 1-6 in one command -> <out>/spatial_map (docs/INTERFACES.md §6)."""
     from spatial.fusion.tsdf import TSDFParams
+    from spatial.io.keyframes import KeyframeParams
     from spatial.phase3 import Phase3Config
     from spatial.pipeline import run_pipeline
 
@@ -205,6 +209,7 @@ def run(
         noise_preset=noise_preset,
         seed=seed,
         depth_scale=depth_scale,
+        keyframes=KeyframeParams() if keyframes else None,
         phase3=Phase3Config(downscale=phase3_downscale, tsdf_p=TSDFParams(voxel=0.02)),
     )
     typer.echo(json.dumps({"spatial_map": str(sm)}))

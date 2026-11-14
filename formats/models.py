@@ -294,3 +294,39 @@ class ReconstructionManifest(Strict):
     peak_ram_mb: float
     params: dict
     versions: dict[str, str]
+
+
+# ---- QA gate / Job Report (HANDOFF §3 stage 9; spec D-ScanQA) ----------------------------
+
+
+class GateResult(Strict):
+    name: str
+    category: Literal["capture", "output"] = Field(
+        description="capture: fixable by rescanning; output: a processing-quality result"
+    )
+    status: Literal["pass", "warn", "fail", "skipped"]
+    value: float | str | None = None
+    threshold: str
+    message: str
+
+
+class RescanRegion(Strict):
+    """A surface patch the scan did not observe well enough, anchored in the world frame."""
+
+    surface: Literal["wall", "floor", "ceiling"]
+    wall_index: int | None = Field(None, description="index of the floor-polygon edge")
+    reason: Literal["unseen", "few_views", "narrow_baseline"]
+    corners: list[list[float]] = Field(description="4 world-frame corners (metres)")
+    area_m2: float
+    priority: float = Field(ge=0, le=1)
+    instruction: str
+
+
+class JobReport(Strict):
+    version: str = FORMAT_VERSION
+    verdict: Literal["pass", "pass_with_warnings", "needs_rescan"]
+    gates: list[GateResult]
+    coverage: dict[str, float] = Field(description="observed fraction per surface type")
+    rescan: list[RescanRegion]
+    inputs: dict
+    notes: list[str] = []

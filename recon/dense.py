@@ -31,6 +31,7 @@ class DenseParams:
     texture: bool = True
     poisson_depth: int = 9  # fallback only
     timeout_s: int = 7200
+    memory_gb: float | None = None  # docker memory cap per OpenMVS step (RAM + swap)
 
 
 def _newest(folder: Path, pattern: str) -> Path:
@@ -108,6 +109,7 @@ def run_dense_mesh_texture(
         out,
         imgs,
         p.timeout_s,
+        p.memory_gb,
     )
     t["densify"] = r.seconds
     dense_ply = out / "dense" / "scene_dense.ply"
@@ -129,6 +131,7 @@ def run_dense_mesh_texture(
         out,
         imgs,
         p.timeout_s,
+        p.memory_gb,
     )
     t["reconstruct_mesh"] = r.seconds
     mesh_ply = out / "mesh" / "mesh.ply"
@@ -154,6 +157,7 @@ def run_dense_mesh_texture(
             out,
             imgs,
             p.timeout_s,
+            p.memory_gb,
         )
         t["refine_mesh"] = r.seconds
         texture_mesh_src = out / "mesh" / "mesh_refined.ply"
@@ -182,6 +186,7 @@ def run_dense_mesh_texture(
             out,
             imgs,
             p.timeout_s,
+            p.memory_gb,
         )
         t["texture_mesh"] = r.seconds
         obj = _newest(out / "mesh" / "textured", "*.obj")

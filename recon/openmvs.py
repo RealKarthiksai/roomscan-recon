@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,13 +35,23 @@ class ToolRun:
     seconds: float
 
 
-def run_tool(
-    tool: str, args: list[str], out: Path, images: Path | None = None, timeout: int = 7200
-) -> ToolRun:
+def docker_cmd(
+    tool: str,
+    args: list[str],
+    out: Path,
+    images: Path | None = None,
+    memory_gb: float | None = None,
+    name: str | None = None,
+) -> list[str]:
+    """The docker invocation for one OpenMVS tool. `memory_gb` caps the container (RAM and swap
+    together), so a memory-hungry step is killed inside its own container instead of putting the
+    whole desktop session under memory pressure."""
     cmd = [
         "docker",
         "run",
         "--rm",
+        "--name",
+        name or f"roomscan-{tool}-{uuid.uuid4().hex[:8]}",
         "-u",
         f"{os.getuid()}:{os.getgid()}",
         "-v",
@@ -48,9 +59,28 @@ def run_tool(
     ]
     if images is not None:
         cmd += ["-v", f"{images.resolve()}:/images:ro"]
+    if memory_gb is not None:
+        cmd += ["--memory", f"{memory_gb:g}g", "--memory-swap", f"{memory_gb:g}g"]
     cmd += [IMAGE, f"{BIN}/{tool}", *args, "-w", "/out"]
+    return cmd
+
+
+def run_tool(
+    tool: str,
+    args: list[str],
+    out: Path,
+    images: Path | None = None,
+    timeout: int = 7200,
+    memory_gb: float | None = None,
+) -> ToolRun:
+    name = f"roomscan-{tool}-{uuid.uuid4().hex[:8]}"
+    cmd = docker_cmd(tool, args, out, images, memory_gb, name)
     t0 = time.perf_counter()
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except BaseException:  # timeout / Ctrl-C: do not leave the container running unattended
+        subprocess.run(["docker", "kill", name], capture_output=True)
+        raise
     dt = time.perf_counter() - t0
     log = out / "logs"
     log.mkdir(exist_ok=True)

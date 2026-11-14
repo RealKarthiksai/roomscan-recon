@@ -11,6 +11,8 @@ FORBIDDEN = {
     "spatial": {"recon", "eval"},
     "recon": {"spatial", "eval"},
     "formats": {"spatial", "recon", "eval"},
+    "export": {"spatial", "recon", "eval"},
+    "qa": {"spatial", "recon", "eval"},
 }
 
 

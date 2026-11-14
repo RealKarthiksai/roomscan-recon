@@ -59,11 +59,15 @@ def test_eth3d_dense_mesh_texture(request):
     names = sorted(p.name for p in (WS / "images").glob("*.jpg"))
     train, held = split_names(names, 5)
     if not (OUT / "run.json").exists():  # geometry run: every image
-        run = run_dense_mesh_texture(scene, OUT, DenseParams(resolution_level=LEVEL), None)
+        run = run_dense_mesh_texture(
+            scene, OUT, DenseParams(resolution_level=LEVEL, max_threads=3), None
+        )
         (OUT / "run.json").write_text(json.dumps(run, indent=1, default=str))
     run = json.loads((OUT / "run.json").read_text())
     if not (OUT_HELD / "run.json").exists():  # texture run: held-out images excluded
-        runh = run_dense_mesh_texture(scene, OUT_HELD, DenseParams(resolution_level=LEVEL), train)
+        runh = run_dense_mesh_texture(
+            scene, OUT_HELD, DenseParams(resolution_level=LEVEL, max_threads=3), train
+        )
         (OUT_HELD / "run.json").write_text(json.dumps(runh, indent=1, default=str))
     run_held = json.loads((OUT_HELD / "run.json").read_text())
 

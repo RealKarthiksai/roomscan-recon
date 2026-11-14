@@ -19,6 +19,7 @@ SCHEMAS = {
     "workspace/priors": m.Priors,
     "workspace/workspace_meta": m.WorkspaceMeta,
     "reconstruction/manifest": m.ReconstructionManifest,
+    "qa/job_report": m.JobReport,
     "stage_meta": m.StageMeta,
     "depth_alignment": m.DepthAlignment,
 }

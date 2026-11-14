@@ -29,6 +29,8 @@ dependencies = [
     "torchmetrics[image]>=1.8",
     "gsplat==1.5.3",      # Part 4 only (CUDA at runtime)
     "torch>=2.14",        # flavour chosen via extra below
+    "ezdxf>=1.4",
+    "laspy[lazrs]>=2.5",
 ]
 
 [project.optional-dependencies]

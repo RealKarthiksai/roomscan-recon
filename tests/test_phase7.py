@@ -40,3 +40,13 @@ def test_eth3d_sparse_checks_and_openmvs_load(tmp_path):
     assert c["reg_ratio"] >= 0.95 and c["mean_reproj_px"] < 1.0
     if openmvs.available():
         assert out["openmvs_log_summary"] is not None, "OpenMVS did not report loaded images"
+
+
+@pytest.mark.light
+def test_docker_command_has_memory_cap_and_unique_name(tmp_path):
+    a = openmvs.docker_cmd("DensifyPointCloud", ["-i", "x"], tmp_path, tmp_path, memory_gb=3.5)
+    b = openmvs.docker_cmd("DensifyPointCloud", ["-i", "x"], tmp_path, None)
+    assert a[a.index("--memory") + 1] == "3.5g" and a[a.index("--memory-swap") + 1] == "3.5g"
+    assert "--memory" not in b
+    assert a[a.index("--name") + 1] != b[b.index("--name") + 1]  # unique: killable on timeout
+    assert a[-3] == "-w" and a[-2] == "/out" or a[-2:] == ["-w", "/out"]

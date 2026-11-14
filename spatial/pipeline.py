@@ -8,6 +8,7 @@ from pathlib import Path
 
 from spatial.fusion.tsdf import TSDFParams
 from spatial.io.ingest import ingest
+from spatial.io.keyframes import KeyframeParams
 from spatial.phase3 import Phase3Config, run_phase3
 from spatial.room.planes import PlaneParams
 from spatial.room.run import run_room
@@ -30,6 +31,7 @@ def run_pipeline(
     depth_scale: bool = False,
     phase3: Phase3Config | None = None,
     voxel: float = 0.02,
+    keyframes: KeyframeParams | None = None,
 ) -> Path:
     """Returns the spatial_map directory (<run>/spatial_map). Needs gravity (priors) for a
     meaningful room model; without it `room.json` labels are flagged in quality.json."""
@@ -43,6 +45,7 @@ def run_pipeline(
         prior=prior,
         noise_preset=noise_preset,
         seed=seed,
+        keyframes=keyframes,
     )
     refine(ws, run, max_image_size=max_image_size, depth_scale=depth_scale)
     cfg = phase3 or Phase3Config(downscale=2, tsdf_p=TSDFParams(voxel=voxel))
