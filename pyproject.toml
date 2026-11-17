@@ -79,6 +79,8 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# repo root first: dash 4.5.0 ships a stray top-level `benchmarks` package that shadows ours
+pythonpath = ["."]
 markers = [
     "light: fast checks on synthetic/controlled data (CPU, seconds)",
     "heavy: real-data benchmarks; write measured values to runs/test_results/",
