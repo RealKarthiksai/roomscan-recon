@@ -5,8 +5,9 @@ filter so a plane cannot collect points from crossing surfaces; 3. least-squares
 4. merge near-coplanar planes; 5. label by gravity: floor = lowest large horizontal plane,
 ceiling = highest, walls = large vertical planes spanning a good part of the room height
 and (when a ceiling exists) reaching up to it, which rejects cabinet and table faces;
-6. floor polygon from consecutive wall-line intersections (fallback: convex hull of floor
-inliers); ceiling height = ceiling_z - floor_z. Deterministic for a fixed `seed`.
+6. floor polygon from consecutive wall-line intersections, or the wall-snapped footprint
+contour when it shows a recess / bay (fallback: convex hull of floor inliers); ceiling
+height = ceiling_z - floor_z. Deterministic for a fixed `seed`.
 """
 
 from __future__ import annotations
@@ -41,7 +42,10 @@ class PlaneParams:
     footprint_close_m: float = 0.30  # closes gaps in the wall ring (unseen / occluded wall)
     footprint_band_m: float = 0.30  # ignore points this close to floor / ceiling (TSDF smear)
     footprint_simplify_m: float = 0.05  # Douglas-Peucker tolerance
-    footprint_accept_iou: float = 0.97  # wall-intersection polygon kept if IoU >= this
+    # contour replaces the wall polygon if they differ by a blob this wide
+    footprint_blob_m: float = 0.20
+    snap_dist_m: float = 0.12  # contour edge -> wall line: max midpoint distance
+    snap_angle_deg: float = 10.0  # contour edge -> wall line: max direction difference
     wall_top_tol_m: float = 0.35  # with a ceiling: wall inliers must reach ceiling_z - tol
     seed: int = 0
 
@@ -233,7 +237,8 @@ def _is_simple(poly: np.ndarray) -> bool:
 
 def dominant_walls(P, planes, walls: list[int], p: PlaneParams) -> list[int]:
     """One wall per direction cluster (normals within `wall_cluster_deg`): the largest by
-    inlier count. Recesses/bays (parallel walls at other offsets) are not modelled in v1."""
+    inlier count. Recesses/bays (parallel walls at other offsets) are handled by the footprint
+    contour in `floor_polygon`, not here."""
     cos_c = np.cos(np.radians(p.wall_cluster_deg))
     keep: list[int] = []
     for k in sorted(walls, key=lambda k: -len(planes[k].idx)):
@@ -292,26 +297,107 @@ def footprint_polygon(P, lab, p: PlaneParams):
     return poly, (x0, y0, cell, shape)
 
 
+def _wall_lines(planes, walls: list[int]) -> list[tuple[np.ndarray, float]]:
+    """(unit 2D normal, offset) of each labelled wall, in `walls` order."""
+    out = []
+    for k in walls:
+        n2 = planes[k].normal[:2]
+        s = np.linalg.norm(n2)
+        out.append((n2 / s, planes[k].d / s))
+    return out
+
+
+def _snap_contour(foot: np.ndarray, lines, p: PlaneParams, min_corner_angle_deg: float = 30.0):
+    """Snap the grid-quantised contour edges (>= 0.20 m) to detected wall lines (direction within
+    `snap_angle_deg`, midpoint within `snap_dist_m`, nearest wins), merge consecutive edges on the
+    same wall and rebuild vertices by line intersection. A vertex whose two lines are nearly
+    parallel keeps its raw position; next to an unmatched edge it is projected on the snapped
+    line. Returns the snapped polygon, or `foot` unchanged when nothing matches or the result is
+    not simple / not within 3 % of the raw area."""
+    n = len(foot)
+    if n < 3 or not lines:
+        return foot
+    sin_a = np.sin(np.radians(p.snap_angle_deg))
+    sin_min = np.sin(np.radians(min_corner_angle_deg))
+    asg: list[int | None] = []
+    for i in range(n):
+        a, b = foot[i], foot[(i + 1) % n]
+        e = b - a
+        length = float(np.linalg.norm(e))
+        best, best_d = None, np.inf
+        if length >= 0.20:
+            u, m = e / length, 0.5 * (a + b)
+            for w, (n2, d2) in enumerate(lines):
+                dist = abs(float(n2 @ m) + d2)
+                if abs(float(n2 @ u)) <= sin_a and dist <= p.snap_dist_m and dist < best_d:
+                    best, best_d = w, dist
+        asg.append(best)
+    if all(a is None for a in asg):
+        return foot
+
+    starts = [i for i in range(n) if not (asg[i] is not None and asg[i] == asg[i - 1])]
+    if not starts:
+        return foot  # one wall for the whole outline: degenerate
+    groups = [(asg[g], g) for g in starts]  # (wall | None, first edge index)
+    verts = []
+    for gi, (w, first) in enumerate(groups):
+        wp = groups[gi - 1][0]
+        raw = foot[first]
+        if w is not None and wp is not None:
+            (n1, d1), (n2, d2) = lines[wp], lines[w]
+            A = np.array([n1, n2])
+            if abs(np.linalg.det(A)) >= sin_min:
+                verts.append(np.linalg.solve(A, -np.array([d1, d2])))
+            else:
+                verts.append(raw)
+        elif w is not None or wp is not None:
+            n1, d1 = lines[w if w is not None else wp]
+            verts.append(raw - (float(n1 @ raw) + d1) * n1)
+        else:
+            verts.append(raw)
+    poly = np.array(verts)
+    if len(poly) < 3:
+        return foot
+    if _shoelace(poly) < 0:
+        poly = poly[::-1]
+    area, raw_area = _shoelace(poly), _shoelace(foot)
+    if not (_is_simple(poly) and area > 0 and abs(area - raw_area) <= 0.03 * raw_area):
+        return foot
+    return poly
+
+
+def _has_blob(a: np.ndarray, b: np.ndarray, p: PlaneParams) -> bool:
+    """True when the symmetric difference of two rasters holds a blob wider than
+    `footprint_blob_m` (a recess or bay); thin TSDF edge slivers are removed by the opening."""
+    k = int(round(p.footprint_blob_m / p.footprint_cell_m)) | 1
+    diff = (a ^ b).astype(np.uint8)
+    opened = cv2.morphologyEx(
+        diff, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    )
+    return bool(opened.any())
+
+
 def floor_polygon(P, planes, lab, p: PlaneParams, min_corner_angle_deg: float = 30.0):
-    """2D CCW floor polygon. Primary: intersect consecutive dominant-wall lines (ordered by the
-    angle of their inlier centroid around the room centre; near-parallel neighbours are
-    skipped). Validated (simple, >= 3 corners, area within [0.7, 1.6]x the floor-hull area
-    when a floor exists). Fallback: convex hull of floor inliers."""
+    """2D CCW floor polygon. Candidates, in order: (1) intersect consecutive dominant-wall lines
+    (ordered by the angle of their inlier centroid around the room centre; near-parallel
+    neighbours skipped), validated (simple, >= 3 corners, area within [0.7, 1.6]x the floor-hull
+    area when a floor exists), kept when the footprint contour adds no blob (recess / bay wider
+    than `footprint_blob_m`) relative to it; (2) the footprint contour snapped to the wall
+    lines, used when the wall polygon is invalid or differs by such a blob (the contour is
+    computed whenever >= 3 walls exist or the wall polygon is invalid); (3) fallback: convex
+    hull of floor inliers."""
     hull_poly, hull_area = None, None
     if lab["floor"] is not None:
         xy = P[planes[lab["floor"]].idx, :2]
         h = ConvexHull(xy)
         hull_poly, hull_area = xy[h.vertices], float(h.volume)
     walls = dominant_walls(P, planes, lab["walls"], p)
+    poly, area = None, None  # validated wall-intersection polygon
     if len(walls) >= 3:
         cs = np.array([P[planes[k].idx, :2].mean(0) for k in walls])
         centre = cs.mean(0) if hull_poly is None else hull_poly.mean(0)
         order = np.argsort(np.arctan2(cs[:, 1] - centre[1], cs[:, 0] - centre[0]))
-        lines = []  # (n2, d2): n2.x + d2 = 0 in 2D
-        for k in [walls[o] for o in order]:
-            n2 = planes[k].normal[:2]
-            s = np.linalg.norm(n2)
-            lines.append((n2 / s, planes[k].d / s))
+        lines = _wall_lines(planes, [walls[o] for o in order])
         sin_min = np.sin(np.radians(min_corner_angle_deg))
         corners = []
         for i in range(len(lines)):
@@ -321,29 +407,34 @@ def floor_polygon(P, planes, lab, p: PlaneParams, min_corner_angle_deg: float = 
                 continue
             corners.append(np.linalg.solve(A, -np.array([d1, d2])))
         if len(corners) >= 3:
-            poly = np.array(corners)
-            if _shoelace(poly) < 0:
-                poly = poly[::-1]
-            area = _shoelace(poly)
-            ok = _is_simple(poly) and area > 0
+            cand = np.array(corners)
+            if _shoelace(cand) < 0:
+                cand = cand[::-1]
+            a_ = _shoelace(cand)
+            ok = _is_simple(cand) and a_ > 0
             if ok and hull_area is not None:
-                ok = 0.7 * hull_area <= area <= 1.6 * hull_area
+                ok = 0.7 * hull_area <= a_ <= 1.6 * hull_area
             if ok:
-                foot, grid = footprint_polygon(P, lab, p)
-                if foot is not None and not (0.5 * hull_area <= _shoelace(foot) <= 1.3 * hull_area):
-                    foot = None  # ring leaked or footprint implausible
-                if foot is None:
-                    return poly, area, "wall_intersections"
+                poly, area = cand, a_
+    if len(lab["walls"]) >= 3 or poly is None:
+        foot, grid = footprint_polygon(P, lab, p)
+        if foot is not None and hull_area is not None:
+            if not (0.5 * hull_area <= _shoelace(foot) <= 1.3 * hull_area):
+                foot = None  # ring leaked or footprint implausible
+        if foot is not None:
+            use_foot = poly is None  # no valid wall polygon: the contour is the better candidate
+            if poly is not None:
                 x0, y0, cell, shape = grid
                 try:
                     a = _raster_poly(poly, x0, y0, cell, shape)
                 except cv2.error:
                     a = np.zeros(shape, bool)
-                b = _raster_poly(foot, x0, y0, cell, shape)
-                iou = float((a & b).sum() / max(1, (a | b).sum()))
-                if iou >= p.footprint_accept_iou:
-                    return poly, area, "wall_intersections"
-                return foot, _shoelace(foot), "footprint_contour"
+                use_foot = _has_blob(a, _raster_poly(foot, x0, y0, cell, shape), p)
+            if use_foot:
+                snapped = _snap_contour(foot, _wall_lines(planes, lab["walls"]), p)
+                return snapped, _shoelace(snapped), "footprint_contour"
+    if poly is not None:
+        return poly, area, "wall_intersections"
     if hull_poly is not None:
         poly = hull_poly if _shoelace(hull_poly) > 0 else hull_poly[::-1]
         return poly, _shoelace(poly), "floor_hull"

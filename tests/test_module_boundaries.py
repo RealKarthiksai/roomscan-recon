@@ -19,7 +19,7 @@ FORBIDDEN = {
 
 def _imports(py: Path) -> set[str]:
     mods = set()
-    for node in ast.walk(ast.parse(py.read_text())):
+    for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             mods |= {a.name.split(".")[0] for a in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:

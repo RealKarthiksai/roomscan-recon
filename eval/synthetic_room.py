@@ -31,24 +31,50 @@ def _quad(mesh_v, mesh_t, p):
     mesh_t += [[i, i + 1, i + 2], [i, i + 2, i + 3]]
 
 
-def l_room_mesh() -> o3d.geometry.TriangleMesh:
-    """Closed L-shaped room (floor/ceiling as two rectangles each, six walls), height ROOM[2]."""
+# Box room 4.0 x 3.5 with a small 0.8 x 0.4 m recess in the y = 3.5 wall (area 14.32 m²):
+# 2.8 % of the footprint, below the old IoU gate (0.97) of the contour/wall-polygon comparison.
+RECESS_OUTLINE = [
+    (0, 0),
+    (4.0, 0),
+    (4.0, 3.5),
+    (2.4, 3.5),
+    (2.4, 3.9),
+    (1.6, 3.9),
+    (1.6, 3.5),
+    (0, 3.5),
+]
+RECESS_AREA = 4.0 * 3.5 + 0.8 * 0.4
+
+_FLOOR_RECTS = {
+    "L": [(0, 4.0, 0, 2.0), (0, 2.5, 2.0, 3.5)],
+    "recess": [(0, 4.0, 0, 3.5), (1.6, 2.4, 3.5, 3.9)],
+}
+_OUTLINES = {"L": L_OUTLINE, "recess": RECESS_OUTLINE}
+
+
+def extruded_room_mesh(layout: str) -> o3d.geometry.TriangleMesh:
+    """Closed room from an outline (floor/ceiling rectangles, a quad per wall), height ROOM[2]."""
     Lz = ROOM[2]
+    outline = _OUTLINES[layout]
     V, T = [], []
     for z in (0.0, Lz):
-        for x0, x1, y0, y1 in [(0, 4.0, 0, 2.0), (0, 2.5, 2.0, 3.5)]:
+        for x0, x1, y0, y1 in _FLOOR_RECTS[layout]:
             _quad(V, T, [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]])
-    for k in range(len(L_OUTLINE)):
-        (ax, ay), (bx, by) = L_OUTLINE[k], L_OUTLINE[(k + 1) % len(L_OUTLINE)]
+    for k in range(len(outline)):
+        (ax, ay), (bx, by) = outline[k], outline[(k + 1) % len(outline)]
         _quad(V, T, [[ax, ay, 0], [bx, by, 0], [bx, by, Lz], [ax, ay, Lz]])
     return o3d.geometry.TriangleMesh(
         o3d.utility.Vector3dVector(np.array(V, float)), o3d.utility.Vector3iVector(np.array(T))
     )
 
 
+def l_room_mesh() -> o3d.geometry.TriangleMesh:
+    return extruded_room_mesh("L")
+
+
 def room_mesh(layout: str = "box") -> o3d.geometry.TriangleMesh:
-    if layout == "L":
-        return l_room_mesh()
+    if layout in _OUTLINES:
+        return extruded_room_mesh(layout)
     Lx, Ly, Lz = ROOM
     m = _box(ROOM, (0, 0, 0))
     m += _box((1.2, 0.8, 0.04), (1.0, 1.2, 0.72))  # table top: z in [0.72, 0.76]
@@ -110,6 +136,12 @@ def cameras(seed: int = 0, layout: str = "box") -> list[np.ndarray]:
         for yaw in np.arange(0, 360, 90.0):
             T.append(look(c2, yaw, -60.0))
             T.append(look(c2, yaw + 45, 60.0))
+    if layout == "recess":  # a station near the recess wall looking into the recess and along it
+        c2 = np.array([2.0, 2.9, 1.4])
+        for yaw in np.arange(0, 360, 20.0):
+            T.append(look(c2 + rng.normal(0, 0.03, 3), yaw, (-15 if int(yaw / 20) % 2 else 15)))
+        for yaw in (60.0, 90.0, 120.0):  # toward +y: back wall and both recess side walls
+            T.append(look(c2 + [0, 0.3, 0], yaw, 0.0))
     return T
 
 

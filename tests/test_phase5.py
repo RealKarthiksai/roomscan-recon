@@ -91,6 +91,22 @@ def test_outputs_schema_valid_and_deterministic(synthetic, tmp_path):
         assert sha256_file(d / "phase5" / f) == sha256_file(tmp_path / "again" / f), f
 
 
+def _polygon_iou(a: np.ndarray, b: np.ndarray, cell: float = 0.02) -> float:
+    import cv2
+
+    lo = np.minimum(a.min(0), b.min(0)) - 0.1
+    hi = np.maximum(a.max(0), b.max(0)) + 0.1
+    shape = tuple(np.ceil((hi - lo)[::-1] / cell).astype(int))
+
+    def raster(poly):
+        m = np.zeros(shape, np.uint8)
+        cv2.fillPoly(m, [np.round((poly - lo) / cell).astype(np.int32).reshape(-1, 1, 2)], 1)
+        return m.astype(bool)
+
+    ra, rb = raster(a), raster(b)
+    return float((ra & rb).sum() / max(1, (ra | rb).sum()))
+
+
 REPLICA_CLOUD = ROOT / "runs/bench_phase3/room0/R1/phase3/fusion/cloud.ply"
 REPLICA_MESH = ROOT / "data/replica/room0_mesh.ply"
 
@@ -126,6 +142,10 @@ def test_replica_room0_real_cloud(tmp_path):
     assert len(dev) >= 4 and max(dev) <= 3.0  # HANDOFF P5 real-data check: floor ⟂ wall
     assert abs(p.ceiling_height_m - q.ceiling_height_m) <= 0.02
     assert abs(p.floor_area_m2 - q.floor_area_m2) / q.floor_area_m2 <= 0.03
+    # self-consistency: predicted footprint polygon vs the polygon from the GT-mesh cloud
+    iou = _polygon_iou(np.asarray(p.floor_polygon), np.asarray(q.floor_polygon))
+    _save("replica_room0", {**vals, "floor_polygon_iou_gtmesh": iou})
+    assert iou >= 0.95
 
 
 @pytest.mark.light
@@ -151,10 +171,38 @@ def test_l_shaped_room_polygon_and_fields(tmp_path):
     }
     _save("synthetic_L", vals)
     assert room.floor_polygon_source == "footprint_contour"
-    assert vals["area_rel_err"] <= 0.03 and max(corner_err) <= 0.08
+    # wall-line snapping: max corner error 4.5 cm -> 1.0 cm (measured); 2 cm leaves headroom
+    assert vals["area_rel_err"] <= 0.03 and max(corner_err) <= 0.02
     assert vals["n_walls"] == 6
     assert room.floor_tilt_deg is not None and room.floor_tilt_deg < 1.0
     assert np.allclose(np.asarray(room.R_floor_up) @ np.asarray(room.R_floor_up).T, np.eye(3))
+
+
+@pytest.mark.light
+def test_recess_room_polygon(tmp_path):
+    """4x3.5 m box with a 0.8x0.4 m recess (2.8 % of the area, below the old IoU gate): the
+    floor polygon must still contain it (8 corners, every GT corner within 8 cm)."""
+    from eval.synthetic_room import RECESS_AREA, RECESS_OUTLINE
+
+    o3d.io.write_point_cloud(str(tmp_path / "r.ply"), fused_cloud(seed=0, layout="recess"))
+    r = run_room(tmp_path / "r.ply", tmp_path / "p5", scale_source="synthetic")
+    room = r["room"]
+    poly = np.asarray(room.floor_polygon)
+    corner_err = [
+        float(np.min(np.linalg.norm(poly - np.asarray(c), axis=1))) for c in RECESS_OUTLINE
+    ]
+    vals = {
+        "source": room.floor_polygon_source,
+        "n_corners": len(poly),
+        "area_m2": room.floor_area_m2,
+        "area_rel_err": abs(room.floor_area_m2 - RECESS_AREA) / RECESS_AREA,
+        "corner_err_m": corner_err,
+        "n_walls": r["metrics"]["labels"]["wall"],
+    }
+    _save("synthetic_recess", vals)
+    assert room.floor_polygon_source == "footprint_contour"
+    assert vals["area_rel_err"] <= 0.03 and max(corner_err) <= 0.08
+    assert vals["n_walls"] == 7
 
 
 @pytest.mark.light
