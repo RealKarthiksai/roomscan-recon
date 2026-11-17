@@ -1,3 +1,7 @@
+> **FROZEN 2026-11-14.** Historical plan, no longer updated. Open items moved to
+> [04-TASKS.md](04-TASKS.md); status lives in [PROGRESS.md](../PROGRESS.md); scope lives in
+> the charter ([README.md](README.md) maps who owns what).
+
 # Implementation plan: roomscan-recon (Part 3 `spatial/`, Part 4 `recon/`)
 
 Written 2026-11-14 from PROGRESS.md, HANDOFF.md §5, runs/test_results and the Part 2 build
