@@ -73,7 +73,7 @@ Known issues:
 
 Known issues:
 - Replica room0 refined frame is tilted 1.74° (floor normal vs +Z): a Phase 2 gravity residual. Ceiling height uses perpendicular plane distance, so it is unaffected.
-- Floor polygon uses one dominant wall per direction; recesses/bays (room0 has two) are approximated. The GT-mesh comparison is self-consistency, not an independent layout GT.
+- Floor polygon: recesses/bays are modelled by the wall-snapped footprint contour (used when it adds a blob wider than 0.20 m to the dominant-wall polygon, or when that polygon is invalid). Verified on synthetic L and recess rooms only; Replica room0 (two bays) was NOT re-run after this change, so its polygon IoU vs the GT mesh (heavy test, target >= 0.95) is unverified. The GT-mesh comparison is self-consistency, not an independent layout GT.
 - `scale_confidence` is null (no estimator yet).
 
 ## Phase 3-7 evidence (2026-11-14, CPU)
@@ -85,7 +85,8 @@ Known issues:
 | Scale recovery of a model deliberately scaled ×0.37 | TUM 1.3 %, Replica 0.7 % (≤ 2 %) |
 | Replica vio_large with `--depth-scale` | ATE SE3 2.63 → 0.47 cm, scale error 2.35 → 0.05 % (the old miss stays as xfail without the flag) |
 | Synthetic room TSDF Chamfer-L1 | 0.98 cm (≤ 1 cm): voxel-limited, close to the bar |
-| L-shaped synthetic room (bay case) | area error 0.46 %, max corner error 4.5 cm, 6 walls, polygon from footprint contour |
+| L-shaped synthetic room (bay case) | area error 0.46 %, max corner error 4.5 cm before wall-line snapping, 1.0 cm after, 6 walls, polygon from footprint contour |
+| Box + 0.8x0.4 m recess synthetic room (2.8 % of area) | area error 0.26 %, max corner error 0.93 cm, 7 walls, 8-corner polygon from footprint contour (old IoU gate dropped it) |
 | TUM desk keyframes (99 of 594) | max gap 0.244 m / 13.1° (≤ 0.3 m / 15°); mean sharpness 901 vs 212 for uniform sampling |
 | SpatialMap end-to-end Replica (one function call) | 40/40 registered, ceiling 2.7276 m (GT mesh 2.7279), all hashes verify, ~20 s of stages |
 | Downstream determinism (24 files) | byte-identical across two runs |

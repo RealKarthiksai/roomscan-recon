@@ -119,8 +119,10 @@ scale source from `priors.json`. Code: `spatial/room/` (planes.py algorithm, run
 Rules: floor = lowest large horizontal plane facing up; ceiling = highest facing down; wall =
 vertical plane with area ≥ 0.8 m², vertical span ≥ 50 % of room height, reaching within 0.35 m of
 the ceiling (rejects cabinets and tables). Floor polygon = intersections of consecutive
-*dominant* walls (largest wall per direction within 20°), validated against the floor hull;
-recesses and bays are not modelled in v1.
+*dominant* walls (largest wall per direction within 20°), validated against the floor hull,
+kept when the top-down footprint contour adds no blob wider than 0.20 m. Otherwise (recess or
+bay, or invalid wall polygon) the footprint contour is used, with edges snapped to the detected
+wall lines (`floor_polygon_source` stays `footprint_contour`); fallback is the floor hull.
 
 ## 5. `meta.json` for every stage (`formats.StageMeta`)
 

@@ -13,7 +13,7 @@ exists, acceptance not fully met; **missing** = no code.
 | P2 pose refinement | done | phase2_*.json | vio_large scale drift 2.35 % (needs depth-based scale, P3); ETH3D registration intermittent; no vocab-tree / global mapper option |
 | P3 depth + scale | partial | phase3_nyu_*.json, bench_phase3 | Sensor path F@5cm 0.946. Mono path F@5cm 0.338 (R5): below any usable bar. MVS depth (OpenMVS/COLMAP) not wired. Scale-recovery test (×0.37 model) not run. Mono on ETH3D gives 0.28 % valid pixels |
 | P4 fusion | partial | bench_phase3 (Replica Chamfer) | ETH3D eval-tool F-score never computed (needs MVS or usable mono depth); synthetic Chamfer ≤ 1 cm not asserted as a test |
-| P5 planes + room | done | phase5_*.json | ETH3D floor⟂wall check blocked (no gravity); one dominant wall per direction (no bays); scale_confidence null |
+| P5 planes + room | done | phase5_*.json | ETH3D floor⟂wall check blocked (no gravity); bays/recesses via wall-snapped footprint contour (synthetic L and recess tested, Replica room0 not re-run); scale_confidence null |
 | P6 SpatialMap writer | missing | – | – |
 | P7–P10 Part 4 (`recon/`) | missing | `recon/__init__.py` only | all of sparse export, OpenMVS dense/mesh/texture, gsplat, packaging |
 | Reports | missing | docs/PHASE_REPORTS empty | no per-phase report has been written |
@@ -60,9 +60,9 @@ Goal: a depth path that works without a depth sensor, and scale from depth.
 - Add `--max-frames` streaming so a 2000-frame scene fuses under 3 GB RSS (voxel 2 cm).
 
 ### P5 (polish): planes + room — 3 days, CPU
-- Bays/recesses: keep every wall per direction and build the polygon by walking wall
-  segments (inlier extent), not just one dominant line. Test on Replica room0: polygon IoU
-  vs the GT-mesh floor hull ≥ 0.95.
+- Bays/recesses: done via the wall-snapped footprint contour (synthetic L and recess rooms).
+  Still to run: Replica room0 polygon IoU vs the GT-mesh polygon ≥ 0.95 (heavy test added,
+  data absent when implemented, not re-run).
 - Gravity residual: feed the floor normal back as a frame correction (Replica frame is tilted
   1.74°). Store the correction in `room.json`, do not silently rotate the cloud.
 - `scale_confidence`: a documented rule (sensor depth 1.0, metric priors 0.8, SfM-only 0.0)
