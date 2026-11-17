@@ -1,5 +1,7 @@
 """Phase 3 light tests: measured behaviour of alignment, masks, consistency, fusion parity."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -33,6 +35,110 @@ def test_alignment_recovers_scale_with_20pct_outliers(kind):
 def test_alignment_rejects_frames_with_too_few_points():
     r = fit_scale(np.array([1.0, 2.0]), np.array([0.5, 1.0]), "metric", AlignParams())
     assert r["status"] == "rejected_few_points"
+
+
+S_TRUE, T_TRUE = 1.37, 0.08
+GOLDEN_RANSAC = {
+    "metric": {
+        "scale": 1.3702025154700532,
+        "shift": 0.0,
+        "inliers": 386,
+        "n_points": 500,
+        "residual_m": 0.0071738907015459485,
+        "status": "ok",
+    },
+    "inverse_relative": {
+        "scale": 1.370369498626998,
+        "shift": 0.07998497721684573,
+        "inliers": 386,
+        "n_points": 500,
+        "residual_m": 0.005426986373969767,
+        "status": "ok",
+    },
+}
+
+
+def _align_data(kind, outliers):
+    rng = np.random.default_rng(0)
+    z = rng.uniform(0.5, 5.0, 500)
+    p = z / S_TRUE if kind == "metric" else (1 / z - T_TRUE) / S_TRUE
+    p = p * rng.normal(1, 0.005, len(p))
+    out = rng.random(len(z)) < 0.20
+    z_obs = z.copy()
+    if outliers:
+        z_obs[out] *= rng.uniform(1.5, 3.0, out.sum())
+    return z_obs, p
+
+
+@pytest.mark.light
+@pytest.mark.parametrize("kind", ["metric", "inverse_relative"])
+def test_alignment_default_is_ransac_and_unchanged(kind):
+    z, p = _align_data(kind, True)
+    a = fit_scale(z, p, kind, AlignParams())
+    b = fit_scale(z, p, kind, AlignParams(method="ransac"))
+    assert a == b == GOLDEN_RANSAC[kind]
+
+
+@pytest.mark.light
+@pytest.mark.parametrize("kind", ["metric", "inverse_relative"])
+def test_lstsq_recovers_scale_on_clean_noisy_data(kind):
+    z, p = _align_data(kind, False)
+    r = fit_scale(z, p, kind, AlignParams(method="lstsq"))
+    assert r["status"] == "ok"
+    assert abs(r["scale"] - S_TRUE) / S_TRUE < 0.01
+
+
+@pytest.mark.light
+@pytest.mark.parametrize("kind", ["metric", "inverse_relative"])
+def test_lstsq_is_worse_than_ransac_with_outliers(kind):
+    z, p = _align_data(kind, True)
+    err = {}
+    for m in ("ransac", "lstsq"):
+        r = fit_scale(z, p, kind, AlignParams(method=m))
+        err[m] = abs(r["scale"] - S_TRUE) / S_TRUE if r["scale"] is not None else np.inf
+    assert err["lstsq"] > err["ransac"]
+
+
+@pytest.mark.light
+def test_lstsq_rejects_few_points_and_degenerate_inputs():
+    prm = AlignParams(method="lstsq")
+    r = fit_scale(np.array([1.0, 2.0]), np.array([0.5, 1.0]), "metric", prm)
+    assert r["status"] == "rejected_few_points"
+    z = np.full(50, 2.0)
+    p = np.full(50, 0.5)  # constant p: rank-deficient inverse fit
+    r = fit_scale(z, p, "inverse_relative", prm)
+    assert r["status"] == "rejected_few_points" and r["scale"] is None
+
+
+@pytest.mark.light
+def test_align_method_is_validated():
+    with pytest.raises(ValueError):
+        AlignParams(method="x")
+    with pytest.raises(ValueError):
+        replace(AlignParams(), method="x")
+
+
+@pytest.mark.light
+def test_phase3_hash_keeps_default_and_separates_lstsq():
+    import importlib.util
+    from pathlib import Path
+
+    from spatial.phase3 import Phase3Config
+
+    # Load by path: a third-party `benchmarks` package in site-packages can shadow ours.
+    path = Path(__file__).resolve().parents[1] / "benchmarks" / "phase3.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_bench_phase3_hash", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:  # heavy benchmark imports unavailable
+        pytest.skip(f"benchmarks/phase3.py not importable: {e}")
+    RUNS, _hash = mod.RUNS, mod._hash
+    assert _hash(vars(Phase3Config())) == "8df38508911251f8"
+    assert _hash(vars(RUNS["R5"])) == "4a646f7a229c24aa"
+    cfg = Phase3Config()
+    lst = replace(cfg, align_p=replace(cfg.align_p, method="lstsq"))
+    assert _hash(vars(lst)) != _hash(vars(cfg))
 
 
 @pytest.mark.light

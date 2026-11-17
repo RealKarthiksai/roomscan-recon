@@ -6,6 +6,8 @@ point (metres), p = prediction sampled bilinearly at the observed keypoint.
   kind = metric            z = s * p                       (1-point RANSAC)
   kind = inverse_relative  1/z = s * p + t, depth = 1/(s*p+t) (2-point RANSAC, inverse space)
 Residuals are relative depth errors |z_hat - z| / z.
+AlignParams.method: "ransac" (default, RANSAC + Huber) or "lstsq" (plain unweighted least
+squares baseline, no outlier handling; same inlier/status rules for comparability).
 """
 
 from __future__ import annotations
@@ -27,6 +29,11 @@ class AlignParams:
     huber_rel: float = 0.02
     smooth_window: int = 5  # temporal median over log-scale (odd); 1 = off
     seed: int = 0
+    method: str = "ransac"  # "ransac" | "lstsq" (plain least-squares baseline)
+
+    def __post_init__(self):
+        if self.method not in ("ransac", "lstsq"):
+            raise ValueError(f"AlignParams.method must be 'ransac' or 'lstsq', got {self.method!r}")
 
 
 def sample_bilinear(img: np.ndarray, uv: np.ndarray) -> np.ndarray:
@@ -48,8 +55,47 @@ def _predict(kind, s, t, p):
         return 1.0 / (s * p + t)
 
 
+def _fit_lstsq(z: np.ndarray, p: np.ndarray, kind: str, prm: AlignParams, n: int) -> dict:
+    """Plain unweighted OLS baseline (no RANSAC, no Huber, no relative weighting).
+
+    metric: s = sum(p*z) / sum(p*p), t = 0. inverse_relative: OLS of 1/z on [p, 1].
+    Inliers / residual / status use the same rules as the RANSAC path, on all points.
+    """
+    res = {"scale": None, "shift": None, "inliers": 0, "n_points": int(n), "residual_m": None}
+    if kind == "metric":
+        s, t = float(np.sum(p * z) / np.sum(p * p)), 0.0
+    else:
+        sol, _, rank, _ = np.linalg.lstsq(np.c_[p, np.ones(n)], 1.0 / z, rcond=None)
+        if rank < 2:
+            return res | {"status": "rejected_few_points"}
+        s, t = float(sol[0]), float(sol[1])
+    if not (np.isfinite(s) and np.isfinite(t)):
+        return res | {"status": "rejected_few_points"}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        zh = _predict(kind, s, t, p)
+        inl = np.abs(zh - z) / z < prm.inlier_rel
+    resid = float(np.median(np.abs(zh[inl] - z[inl]))) if inl.any() else None
+    rel = float(np.median(np.abs(zh[inl] - z[inl]) / z[inl])) if inl.any() else np.inf
+    status = (
+        "ok"
+        if inl.sum() >= prm.min_inliers and rel <= prm.max_residual_rel
+        else ("rejected_few_points" if inl.sum() < prm.min_inliers else "rejected_residual")
+    )
+    return {
+        "scale": s,
+        "shift": t,
+        "inliers": int(inl.sum()),
+        "n_points": int(n),
+        "residual_m": resid,
+        "status": status,
+    }
+
+
 def fit_scale(z: np.ndarray, p: np.ndarray, kind: str, prm: AlignParams) -> dict:
-    """Robustly fit depth = f(p; s, t) to metric z. Returns s, t, inlier mask, residual."""
+    """Fit depth = f(p; s, t) to metric z (robust unless prm.method == "lstsq").
+
+    Returns s, t, inlier mask, residual.
+    """
     ok = np.isfinite(z) & np.isfinite(p) & (z > 0) & (p > 0)
     z, p = z[ok], p[ok]
     n = len(z)
@@ -57,6 +103,8 @@ def fit_scale(z: np.ndarray, p: np.ndarray, kind: str, prm: AlignParams) -> dict
     need = 1 if kind == "metric" else 2
     if n < max(need, prm.min_inliers):
         return res | {"status": "rejected_few_points"}
+    if prm.method == "lstsq":
+        return _fit_lstsq(z, p, kind, prm, n)
     rng = np.random.default_rng(prm.seed)
     best = (-1, None, None)
     for _ in range(prm.ransac_iters):

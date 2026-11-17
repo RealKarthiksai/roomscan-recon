@@ -97,6 +97,14 @@ def _hash(obj) -> str:
     if obj.get("depth_source") not in ("mvs", "hybrid"):  # keep caches of pre-MVS runs valid
         obj.pop("mvs_p", None)
         obj.pop("mvs_conf_min", None)
+    ap = obj.get("align_p")
+    if ap is not None and getattr(ap, "method", None) == "ransac":
+        # keep caches valid: hash as the pre-`method` AlignParams repr did
+        obj["align_p"] = (
+            f"AlignParams(ransac_iters={ap.ransac_iters!r}, inlier_rel={ap.inlier_rel!r}, "
+            f"min_inliers={ap.min_inliers!r}, max_residual_rel={ap.max_residual_rel!r}, "
+            f"huber_rel={ap.huber_rel!r}, smooth_window={ap.smooth_window!r}, seed={ap.seed!r})"
+        )
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
