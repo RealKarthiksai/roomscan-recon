@@ -47,9 +47,37 @@ def ingest(
     prior: Annotated[str, typer.Option(help="gt | gt_noisy | device | none")] = "gt_noisy",
     noise_preset: str = "vio_small",
     seed: int = 0,
+    dry_run: Annotated[
+        bool, typer.Option(help="report what would be ingested; write nothing, decode nothing")
+    ] = False,
 ):
     """Phase 1: dataset -> workspace."""
+    from spatial.io.adapters import LOADERS
+    from spatial.io.ingest import check_prior, select_frames
     from spatial.io.ingest import ingest as _ingest
+
+    if dry_run:
+        ds = LOADERS[dataset](src)
+        check_prior(ds, dataset, prior)
+        n = len(select_frames(ds, stride, max_frames))
+        typer.echo(
+            json.dumps(
+                {
+                    "dry_run": True,
+                    "dataset": dataset,
+                    "scene": ds.scene,
+                    "frames": n,
+                    "frames_available": len(ds.frames),
+                    "stride": stride,
+                    "max_frames": max_frames,
+                    "downscale": downscale,
+                    "prior": prior,
+                    "has_gt": ds.has_gt,
+                    "device_pose_source": ds.device_pose_source,
+                }
+            )
+        )
+        return
 
     run = _run_dir(out, f"{dataset}")
     ws = _ingest(

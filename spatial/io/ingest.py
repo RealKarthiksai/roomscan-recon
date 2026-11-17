@@ -61,6 +61,28 @@ def _undistort_maps(ds: SourceDataset):
     return maps, K_new
 
 
+def check_prior(ds: SourceDataset, dataset: str, prior: str) -> None:
+    """Raise ValueError when the requested prior is unavailable for this dataset."""
+    if not ds.has_gt and prior in ("gt", "gt_noisy"):
+        raise ValueError(f"{dataset} has no ground truth: use prior='device' or 'none'")
+    if prior == "device" and ds.device_pose_source == "none":
+        raise ValueError(f"{dataset} has no device poses: use prior='none'")
+    if prior == "gt_noisy" and ds.gravity_world_gt is None:
+        raise ValueError("gt_noisy prior needs a gravity direction")
+
+
+def select_frames(
+    ds: SourceDataset, stride: int, max_frames: int | None, keyframes: KeyframeParams | None = None
+) -> list:
+    """Stride, then (without keyframe selection) cap at max_frames; raise when empty."""
+    frames = ds.frames[::stride]
+    if keyframes is None:
+        frames = frames[:max_frames]
+    if not frames:
+        raise ValueError("no frames selected")
+    return frames
+
+
 def ingest(
     dataset: str,
     src: Path,
@@ -88,15 +110,8 @@ def ingest(
     ws = out / "workspace"
     with record_stage("phase1_ingest", out / "phase1", params=params) as rec:
         ds = LOADERS[dataset](src)
-        if not ds.has_gt and prior in ("gt", "gt_noisy"):
-            raise ValueError(f"{dataset} has no ground truth: use prior='device' or 'none'")
-        if prior == "device" and ds.device_pose_source == "none":
-            raise ValueError(f"{dataset} has no device poses: use prior='none'")
-        frames = ds.frames[::stride]
-        if keyframes is None:
-            frames = frames[:max_frames]
-        if not frames:
-            raise ValueError("no frames selected")
+        check_prior(ds, dataset, prior)
+        frames = select_frames(ds, stride, max_frames, keyframes)
         maps, K = _undistort_maps(ds)
         W, H = ds.width // downscale, ds.height // downscale
         K = K.copy()
@@ -115,8 +130,6 @@ def ingest(
         elif prior == "device":
             T_prior, pose_source = [f.T_world_camera_device for f in frames], ds.device_pose_source
         elif prior == "gt_noisy":
-            if ds.gravity_world_gt is None:
-                raise ValueError("gt_noisy prior needs a gravity direction")
             T_prior, noise = simulate_vio_prior(T_gt, ds.gravity_world_gt, noise_preset, seed)
             pose_source = "dataset_gt_noisy"
         else:
