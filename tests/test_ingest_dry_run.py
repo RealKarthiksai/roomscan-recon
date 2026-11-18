@@ -6,11 +6,14 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from spatial.cli import app
 from spatial.io import adapters
 from spatial.io.adapters import SourceDataset, SourceFrame
+
+pytestmark = pytest.mark.light
 
 
 def _fake_loader(*, has_gt: bool = True, device: str = "none", n: int = 10, gravity: bool = False):

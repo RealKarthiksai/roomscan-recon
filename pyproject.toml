@@ -44,7 +44,7 @@ dev = ["pytest>=9.2.0", "ruff>=0.17.4"]
 data = ["remotezip>=0.12.6", "h5py>=3.16"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["spatial", "recon", "formats", "eval"]
+packages = ["spatial", "recon", "formats", "eval", "router", "qa", "export"]
 
 [tool.uv]
 conflicts = [[{ extra = "cpu" }, { extra = "cu126" }, { extra = "cu130" }]]

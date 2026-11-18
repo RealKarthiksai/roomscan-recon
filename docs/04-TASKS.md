@@ -15,12 +15,12 @@
 | ID | Task | Phase | Owner | Started | Notes |
 |---|---|---|---|---|---|
 | T-001 | Adopt project docs template (charter draft, 01-05, ADR/amendment/CR/handoff folders, fact map, CLAUDE.md, PLAN banner) | P0 | main session | 2026-11-17 | brief `docs-template-adopt`; slash commands are its main-session step |
+| T-003 | Windows backslash manifest keys: keys built with `str(p.relative_to(...))` contain `\` on Windows. Write sites: `spatial/stage.py`, `spatial/spatial_map.py`, `recon/package.py`, `recon/dense.py`, `eval/bundles.py`. Comparing validators: `formats/scanbundle.py`, `formats/spatial_map.py`, `formats/reconstruction.py` | P6, P10, P11 | main session | 2026-11-18 | brief `posix-manifest-keys`; owner away, planner settled questions; coordinator count: 9 sites / 11 failing light tests; recount when fixing |
 
 ## TODO (priority order, top = next)
 | ID | Task | Phase | Owner | Depends on | Notes |
 |---|---|---|---|---|---|
 | T-002 | Owner manual steps: `mv docs/charter-draft.md docs/00-PROJECT-CHARTER.md`, remove the DRAFT comment block, set `**Status:** LOCKED` and fill Locked on / Approved by, run `bash scripts/lock-charter.sh`; `git config core.hooksPath .githooks`; `git update-index --chmod=+x` on the hook and charter scripts; commit; push; enable branch protection on `main` (require PR, code-owner review, "Charter integrity" check) | P0 | owner | T-001 | owner only; agents never touch the charter path or push. See `.github/CODEOWNERS` |
-| T-003 | Windows backslash manifest keys: keys built with `str(p.relative_to(...))` contain `\` on Windows. Write sites: `spatial/stage.py`, `spatial/spatial_map.py`, `recon/package.py`, `recon/dense.py`, `eval/bundles.py`. Comparing validators: `formats/scanbundle.py`, `formats/spatial_map.py`, `formats/reconstruction.py` | P6, P10, P11 | | | coordinator count: 9 sites / 11 failing light tests; recount when fixing |
 | T-004 | `tests/test_ingest_dry_run.py` has no `light` marker, so `pytest -m light` skips it | P1 | | | |
 | T-005 | CI runs no project tests: `.github/workflows/charter-check.yml` only runs `verify-charter.sh`. Add `pytest -m light` + `ruff check` | P0 | | T-003, T-004 | needs an ADR update if it changes ADR 002 |
 | T-006 | Source conflict: PROGRESS.md phase table row 1 says "Scan Bundle adapter blocked (no spec)", but `docs/SCAN_BUNDLE.md` v0.1, `formats/scanbundle.py`, `spatial/io/scanbundle.py` and `tests/test_scanbundle.py` exist (commit e5860cc) | P1, P11 | owner | | owner decides the correct status; agents do not edit PROGRESS.md for this |
