@@ -21,10 +21,10 @@ import open3d as o3d
 import pytest
 
 from eval.synthetic_room import fused_cloud
-from formats.models import Intrinsics, Priors, StageMeta
+from formats.models import CamerasFile, Intrinsics, PlanesFile, Priors, RoomModel, StageMeta
 from formats.spatial_map import SpatialMapError, load_spatial_map, verify
 from spatial.room.run import run_room
-from spatial.spatial_map import write_spatial_map
+from spatial.spatial_map import quality_report, write_spatial_map
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "runs" / "test_results"
@@ -160,6 +160,34 @@ def test_quality_warnings_flag_problems(fixture, tmp_path):
     sm = load_spatial_map(write_spatial_map(ws2, p2, p3, p5, tmp_path / "sm", link=False))
     assert any("not gravity-aligned" in w for w in sm.quality.warnings)
     assert any("not metric" in w for w in sm.quality.warnings)
+
+
+@pytest.mark.light
+def test_quality_report_flags_split_sfm(fixture):
+    """Issue #4: a split SfM reconstruction (several models, largest kept) is a warning."""
+    d, ws, p2, p3, p5 = fixture
+    cams = CamerasFile(
+        width=64,
+        height=48,
+        intrinsics=Intrinsics(fx=50, fy=50, cx=31.5, cy=23.5),
+        depth_width=32,
+        depth_height=24,
+        depth_intrinsics=Intrinsics(fx=25, fy=25, cx=15.5, cy=11.5),
+        pose_source="dataset_gt_noisy",
+        metric=True,
+        gravity_aligned=True,
+        frames={},
+    )
+    planes = PlanesFile.model_validate_json((p5 / "planes.json").read_text())
+    room = RoomModel.model_validate_json((p5 / "room.json").read_text())
+    p3m = StageMeta.model_validate_json((p3 / "meta.json").read_text()).metrics
+    reg = {"registered": 20, "n_frames": 26, "reg_ratio": 20 / 26, "mean_reproj_px": 0.5}
+    split = quality_report(cams, {}, p3m, planes, room, reg | {"model_sizes": [20, 6]})
+    msg = "SfM split into 2 models (sizes 20, 6); kept the largest; largest model has 20/26 frames"
+    assert msg in split.warnings
+    for sizes in ([26], None):
+        q = quality_report(cams, {}, p3m, planes, room, reg | {"model_sizes": sizes})
+        assert not any("SfM split" in w for w in q.warnings)
 
 
 @pytest.mark.light

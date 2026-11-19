@@ -72,6 +72,12 @@ def quality_report(
         w.append(f"only {reg['reg_ratio']:.0%} of frames registered")
     if reg["mean_reproj_px"] is not None and reg["mean_reproj_px"] > 1.0:
         w.append(f"mean reprojection error {reg['mean_reproj_px']:.2f} px > 1.0")
+    sizes = reg.get("model_sizes") or []
+    if len(sizes) > 1:
+        w.append(
+            f"SfM split into {len(sizes)} models (sizes {', '.join(map(str, sizes))}); "
+            f"kept the largest; largest model has {max(sizes)}/{reg['n_frames']} frames"
+        )
     if not cams.gravity_aligned:
         w.append("world frame is not gravity-aligned: room labels are unreliable")
     if not cams.metric:
@@ -152,7 +158,10 @@ def write_spatial_map(
     planes = PlanesFile.model_validate_json((phase5_dir / "planes.json").read_text())
     room = RoomModel.model_validate_json((phase5_dir / "room.json").read_text())
     p2 = StageMeta.model_validate_json((phase2_dir / "meta.json").read_text())
-    reg = {k: p2.metrics.get(k) for k in ("registered", "n_frames", "reg_ratio", "mean_reproj_px")}
+    reg = {
+        k: p2.metrics.get(k)
+        for k in ("registered", "n_frames", "reg_ratio", "mean_reproj_px", "model_sizes")
+    }
     quality = quality_report(cams, align, p3.metrics, planes, room, reg)
 
     out.mkdir(parents=True)

@@ -89,7 +89,7 @@ def phases():
             [
                 "E1 (versions), E2 (RANSAC plane), E3 (TSDF sphere), E7 (OpenMVS image): PASS, see PROGRESS.md Phase 0.",
                 "E4/E5 (gsplat on CUDA): PENDING, needs a GPU.",
-                "E6 (pycolmap ETH3D at 1600 px): recorded FAIL on 2026-11-12 (20/26); Phase 2 later registered 26/26 with seeding and multiple_models. Full-resolution rerun is pending.",
+                "E6 (pycolmap ETH3D at 1555 px, /4 INTER_AREA, known PINHOLE K): PASS on 2026-11-19, 3/3 runs registered 26/26, mean reproj 0.484-0.489 px (CPU); intermittent 20/26 per PROGRESS.md:61 is tracked by sfm-repeat-gate (T-026).",
             ],
         ),
         1: (

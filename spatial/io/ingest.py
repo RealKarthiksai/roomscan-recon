@@ -51,6 +51,17 @@ def simulate_vio_prior(T_gt: list[np.ndarray], gravity: np.ndarray, preset: str,
     return out, PoseNoise(preset=preset, seed=seed, **p)
 
 
+def scale_intrinsics(K: np.ndarray, s: float) -> np.ndarray:
+    """Pinhole K after resizing the image by factor s (pixel-centre convention:
+    x' = (x + 0.5) * s - 0.5), so fx, fy scale by s and c' = (c + 0.5) * s - 0.5."""
+    K = K.copy()
+    K[0, 0] *= s
+    K[1, 1] *= s
+    K[0, 2] = (K[0, 2] + 0.5) * s - 0.5
+    K[1, 2] = (K[1, 2] + 0.5) * s - 0.5
+    return K
+
+
 def _undistort_maps(ds: SourceDataset):
     if ds.dist is None:
         return None, ds.K
@@ -91,11 +102,16 @@ def ingest(
     max_frames: int | None = None,
     stride: int = 1,
     downscale: int = 1,
+    max_side: int | None = None,
     prior: str = "gt",
     noise_preset: str = "vio_small",
     seed: int = 0,
     keyframes: KeyframeParams | None = None,
 ) -> Path:
+    if max_side is not None and downscale > 1:
+        raise ValueError("max_side and downscale > 1 are mutually exclusive")
+    if max_side is not None and max_side < 1:
+        raise ValueError(f"max_side must be >= 1, got {max_side}")
     params = dict(
         dataset=dataset,
         src=str(src),
@@ -107,6 +123,8 @@ def ingest(
         seed=seed,
         keyframes=None if keyframes is None else asdict(keyframes),
     )
+    if max_side is not None:  # opt-in key: stage params of default runs stay unchanged
+        params["max_side"] = max_side
     ws = out / "workspace"
     with record_stage("phase1_ingest", out / "phase1", params=params) as rec:
         ds = LOADERS[dataset](src)
@@ -115,11 +133,19 @@ def ingest(
         maps, K = _undistort_maps(ds)
         W, H = ds.width // downscale, ds.height // downscale
         K = K.copy()
-        # Integer downscale with pixel-centre convention: x' = (x + 0.5)/D - 0.5
-        K[0, 0] /= downscale
-        K[1, 1] /= downscale
-        K[0, 2] = (K[0, 2] + 0.5) / downscale - 0.5
-        K[1, 2] = (K[1, 2] + 0.5) / downscale - 0.5
+        resize = downscale > 1
+        if max_side is not None:
+            # Opt-in pre-resize to a long side of max_side (never upscales).
+            s = max_side / max(ds.width, ds.height)
+            if s < 1:
+                W, H, resize = round(ds.width * s), round(ds.height * s), True
+                K = scale_intrinsics(K, s)
+        else:
+            # Integer downscale with pixel-centre convention: x' = (x + 0.5)/D - 0.5
+            K[0, 0] /= downscale
+            K[1, 1] /= downscale
+            K[0, 2] = (K[0, 2] + 0.5) / downscale - 0.5
+            K[1, 2] = (K[1, 2] + 0.5) / downscale - 0.5
         for d in ["images", "depth", *(["gt"] if ds.has_gt else [])]:
             (ws / d).mkdir(parents=True, exist_ok=True)
 
@@ -148,7 +174,7 @@ def ingest(
             img = cv2.imread(str(f.rgb), cv2.IMREAD_COLOR)
             if maps is not None:
                 img = cv2.remap(img, *maps, cv2.INTER_LINEAR)
-            if downscale > 1:
+            if resize:
                 img = cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA)
             cv2.imwrite(str(ws / "images" / f"{fid}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
             depth_rel = None
@@ -156,7 +182,7 @@ def ingest(
                 raw = cv2.imread(str(f.depth), cv2.IMREAD_UNCHANGED).astype(np.float64)
                 if maps is not None:
                     raw = cv2.remap(raw, *maps, cv2.INTER_NEAREST)
-                if downscale > 1:
+                if resize:
                     raw = cv2.resize(raw, (W, H), interpolation=cv2.INTER_NEAREST)
                 mm = np.clip(np.round(raw * ds.depth_scale_m * 1000), 0, 65535).astype(np.uint16)
                 cv2.imwrite(str(ws / "depth" / f"{fid}.png"), mm)
@@ -221,6 +247,7 @@ def ingest(
             "n_frames": len(fp),
             "width": W,
             "height": H,
+            **({"max_side": max_side} if max_side is not None else {}),
             "with_depth": sum(f.depth is not None for f in fp),
         }
         if noise is not None:

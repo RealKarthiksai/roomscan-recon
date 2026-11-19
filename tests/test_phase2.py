@@ -66,6 +66,54 @@ def test_eth3d_sfm_only(tmp_path):
 
 
 @pytest.mark.heavy
+def test_eth3d_sfm_repeat(tmp_path):
+    """Issue #4: registration on ETH3D office is intermittent (multithreaded COLMAP is not
+    bit-deterministic). Gate on the minimum over 5 seeded runs, multithreaded as in production.
+    One ingested workspace and one run dir are shared: each refine call wipes its COLMAP work
+    dirs, and the stage records outputs relative to the run dir, so the workspace must sit inside
+    it (a separate run dir per call raises in record_stage). Metrics come from the return value."""
+    root = DATA / "eth3d" / "office"
+    _need(root)
+    ws = ingest("eth3d", root, tmp_path, downscale=4, prior="none")
+    runs = []
+    for seed in range(5):
+        r = refine(
+            ws,
+            tmp_path,
+            max_image_size=1600,
+            matcher="exhaustive",
+            seed=seed,
+            num_threads=-1,
+        )
+        runs.append(
+            {
+                "seed": seed,
+                "status": r.get("status", "ok"),
+                "registered": r.get("registered", 0),
+                "n_frames": r.get("n_frames"),
+                "mean_reproj_px": r.get("mean_reproj_px"),
+                "model_sizes": r.get("model_sizes"),
+            }
+        )
+    n = len(json.loads((ws / "priors.json").read_text())["frames"])  # frames in the workspace
+    reg = [x["registered"] for x in runs]
+    _save(
+        "phase2_eth3d_repeat",
+        {
+            "runs": runs,
+            "n_frames": n,
+            "registered_min": min(reg),
+            "registered_median": float(np.median(reg)),
+            "full_runs": sum(x == n for x in reg),
+        },
+    )
+    assert n > 0
+    assert all(x["status"] != "failed" for x in runs), runs
+    assert all(x["n_frames"] == n for x in runs), [x["n_frames"] for x in runs]
+    assert min(reg) >= 0.95 * n, f"registered per run {reg} of {n}"
+
+
+@pytest.mark.heavy
 @pytest.mark.xfail(
     strict=False,
     reason="KNOWN MISS (measured 2026-11-14): pycolmap 4.2.1 global mapper registers 26/26 at "

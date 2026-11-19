@@ -19,7 +19,9 @@ Single source of truth for on-disk formats between phases. Pydantic models live 
 
 ## 1. Phase 1: ingest → workspace
 
-`python -m spatial.cli ingest --dataset {replica,tum,eth3d} --src <path> --out runs/<run_id> [--max-frames N] [--stride K] [--downscale D] [--prior {gt,gt_noisy,none}] [--noise-preset {vio_small,vio_large}] [--seed S]`
+`python -m spatial.cli ingest --dataset {replica,tum,eth3d} --src <path> --out runs/<run_id> [--max-frames N] [--stride K] [--downscale D | --max-side N] [--prior {gt,gt_noisy,none}] [--noise-preset {vio_small,vio_large}] [--seed S]`
+
+`--downscale D` is an integer INTER_AREA reduction. `--max-side N` (opt-in, excludes `--downscale > 1`) INTER_AREA-resizes to a long side of N for non-integer ratios (never upscales; size `round(W*s) x round(H*s)`, `s = N / max(W, H)`). Both use the pixel-centre rule for K: `fx, fy *= s`, `c' = (c + 0.5) * s - 0.5`. Measured effect vs COLMAP's internal resize: PROGRESS.md (T-027).
 
 ```
 runs/<run_id>/workspace/

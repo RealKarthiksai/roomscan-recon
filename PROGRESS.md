@@ -28,7 +28,7 @@ Reports with the exact measured numbers: `docs/PHASE_REPORTS/` (regenerate with
 | E1 versions | pass: torch 2.14.1+cpu, gsplat 1.5.3, open3d 0.19.0, pycolmap 4.2.1 |
 | E2 RANSAC plane | pass: normal error < 0.01°, d = −0.5001, 5009 inliers |
 | E3 ScalableTSDF sphere (8 views) | pass: radius 0.50019 m (GT 0.5), std 2.4 mm |
-| E6 pycolmap SfM, ETH3D office 26 imgs @1600 px | **FAIL**: 20/26 registered (77 % < 90 %), reproj 1.083 px; 48 s. Likely low texture + downscale; re-test at full res on GPU machine |
+| E6 pycolmap SfM, ETH3D office 26 imgs @1555 px (/4, INTER_AREA) | pass 2026-11-19 (3 runs): 26/26 registered in all runs, mean reproj 0.484-0.489 px; 37-48 s per run. CPU, known PINHOLE K fixed, INTER_AREA /4. 3/3 runs pass 26/26; intermittency (20/26 on 2026-11-12) per PROGRESS.md:61 is tracked by sfm-repeat-gate (T-026); issue #1 |
 | E4/E5 gsplat | pending (CUDA) |
 | E7 OpenMVS image | pass: all 5 apps report `OpenMVS x64 v2.4.0`, no loader errors; image 594 MB |
 
@@ -61,6 +61,34 @@ Known issues:
 - **ETH3D registration is intermittent**: 1 of ~9 runs registered only 20/26 (multithreaded COLMAP
   isn't bit-deterministic even with fixed seeds). Mitigated by seeding and `multiple_models=True` (keep the largest).
   Repeat runs: ATE 0.91–1.65 cm, rot 0.16–0.28°.
+  T-026 (issue #4) gate, `pytest tests/test_phase2.py -k eth3d_sfm_repeat -m heavy`
+  (`runs/test_results/phase2_eth3d_repeat.json`; seeds 0–4, multithreaded, 2026-11-19, CPU):
+  registered min **26/26**, median 26/26, 5/5 runs full; reproj 0.47–0.49 px. Seeds 0 and 2 also
+  produced a secondary model (sizes [26, 3] and [26, 6]); the largest is kept, and the SpatialMap
+  quality warnings now flag any split ("SfM split into k models ...; largest model has N/M frames").
+  So 2/5 full (26/26) runs also carry a small side model and get this warning; with N = M it is
+  benign. The test asserts no failed run and min ≥ 0.95 × n.
+
+T-027 (issue #3) pre-resize measurement, `scripts/heavy/preresize_measure.py`
+(`runs/test_results/preresize_<scene>.json`; 5 seeded multithreaded `refine` runs per config, CPU,
+2026-11-19). (a) = COLMAP resizes internally to `max_image_size`; (b) = `ingest --max-side` INTER_AREA
+pre-resize to the same long side, same `refine`. ATE = Sim(3) to GT; min registered / median reproj /
+median ATE over the 5 runs. Reproj is measured in each config's own pixel scale, so it is not
+comparable across (a) and (b); the decision uses registered and ATE. In the ETH3D proxy, (a) is INTER_AREA /2 in ingest
+then COLMAP's internal resize to 1600, while (b) is a single INTER_AREA step to 1600; on Replica (a) is COLMAP's resize only.
+
+| Scene (ratio) | (a) COLMAP internal | (b) INTER_AREA pre-resize | (b) no worse? |
+|---|---|---|---|
+| ETH3D office proxy, 26 imgs (3110 px -> 1600, ratio 1.94) | 26/26 min; 0.599 px; ATE 2.24 mm, rot 0.115 deg | 26/26 min; 0.480 px; ATE 3.20 mm, rot 0.191 deg | no (ATE +42 %) |
+| Replica room0, 80 frames, stride 5 (1200x680 -> 1024, ratio 1.17) | 80/80 min; 0.462 px; ATE 0.66 mm, rot 0.027 deg | 80/80 min; 0.436 px; ATE 0.88 mm, rot 0.025 deg | no (ATE +35 %) |
+| TUM fr1/xyz (640x480, ratio 1) | n/a: below `max_image_size`, (a) and (b) are identical; not run | n/a | n/a |
+| Scan Bundle (real phone frames) | BLOCKED: no real capture exists (synthetic bundles are invalid for SfM) | BLOCKED | BLOCKED |
+
+Decision: default unchanged (`refine`/`pipeline` keep COLMAP's internal resize; `--max-side` stays
+opt-in). (b) is not no-worse on ATE in either scene, though all differences are sub-centimetre
+(0.2-1 mm) and well inside the 2 cm threshold; with 5 runs per config this is a measured
+difference between configs, not proof of a general ranking. Issue #3 stays open: it cannot be
+closed without a real Scan Bundle.
 
 ## Phase 5 evidence (2026-11-14, CPU; `runs/test_results/phase5_*.json`, `pytest tests/test_phase5.py`)
 
@@ -133,4 +161,4 @@ Known issues:
 
 - E4/E5 gsplat tests; all `pytest -m gpu` tests (CUDA fusion, GPU inference parity).
 - All `pytest -m arkit` tests (ARKitScenes: R0–R6 on real LiDAR, Step D on ARKitScenes).
-- Re-run E6 at full resolution.
+- (E6 full-res rerun dropped: E6 now registers 26/26 at /4 on CPU, issue #1.)

@@ -44,6 +44,10 @@ def ingest(
     max_frames: int | None = None,
     stride: int = 1,
     downscale: int = 1,
+    max_side: Annotated[
+        int | None,
+        typer.Option(help="opt-in INTER_AREA pre-resize to this long side; excludes --downscale"),
+    ] = None,
     prior: Annotated[str, typer.Option(help="gt | gt_noisy | device | none")] = "gt_noisy",
     noise_preset: str = "vio_small",
     seed: int = 0,
@@ -56,6 +60,8 @@ def ingest(
     from spatial.io.ingest import check_prior, select_frames
     from spatial.io.ingest import ingest as _ingest
 
+    if max_side is not None and downscale > 1:
+        raise typer.BadParameter("--max-side and --downscale > 1 are mutually exclusive")
     if dry_run:
         ds = LOADERS[dataset](src)
         check_prior(ds, dataset, prior)
@@ -71,6 +77,7 @@ def ingest(
                     "stride": stride,
                     "max_frames": max_frames,
                     "downscale": downscale,
+                    "max_side": max_side,
                     "prior": prior,
                     "has_gt": ds.has_gt,
                     "device_pose_source": ds.device_pose_source,
@@ -87,6 +94,7 @@ def ingest(
         max_frames=max_frames,
         stride=stride,
         downscale=downscale,
+        max_side=max_side,
         prior=prior,
         noise_preset=noise_preset,
         seed=seed,

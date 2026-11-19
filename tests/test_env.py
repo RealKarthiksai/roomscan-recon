@@ -12,7 +12,7 @@ import open3d as o3d
 import pytest
 import torch
 
-DATA = Path(__file__).resolve().parents[2] / "data"
+DATA = Path(__file__).resolve().parents[1] / "data"
 cuda = pytest.mark.gpu(vram_gb=1)  # inventory P0-02
 
 
@@ -162,20 +162,52 @@ def test_e5_gsplat_fit_image():
 
 
 def test_e6_pycolmap_sfm_eth3d(tmp_path):
+    import cv2
     import pycolmap
 
-    imgs = DATA / "eth3d" / "office" / "images" / "dslr_images_undistorted"
-    if not imgs.is_dir():
+    root = DATA / "eth3d" / "office"
+    src = root / "images" / "dslr_images_undistorted"
+    cams = root / "dslr_calibration_undistorted" / "cameras.txt"
+    if not src.is_dir() or not cams.is_file():
         pytest.skip("ETH3D office not fetched (data/fetch.sh eth3d)")
-    names = sorted(p.name for p in imgs.glob("*.JPG"))[:30]
+    names = sorted(p.name for p in src.glob("*.JPG"))[:30]
+    # Same inputs as spatial.sfm.refine gets from ingest: known PINHOLE intrinsics (fixed) and
+    # images pre-shrunk with INTER_AREA. COLMAP's internal resize of the 6221 px originals and
+    # EXIF-less focal guessing each leave 6 images in a separate model (20/26, measured).
+    D = 4
+    imgs = tmp_path / "images"
+    imgs.mkdir()
+    for n in names:
+        im = cv2.imread(str(src / n), cv2.IMREAD_COLOR)
+        h, w = im.shape[:2]
+        im = cv2.resize(im, (w // D, h // D), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(str(imgs / n), im, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    line = next(ln for ln in cams.read_text().splitlines() if ln.strip() and ln[0] != "#")
+    fx, fy, cx, cy = map(float, line.split()[4:8])
+    K = [fx / D, fy / D, (cx + 0.5) / D - 0.5, (cy + 0.5) / D - 0.5]  # pixel-centre rule
+    reader = pycolmap.ImageReaderOptions()
+    reader.camera_model = "PINHOLE"
+    reader.camera_params = ",".join(map(str, K))
     db = tmp_path / "db.db"
     opts = pycolmap.FeatureExtractionOptions()
     opts.max_image_size = 1600  # pycolmap 4.2: on FeatureExtractionOptions, not .sift
     pycolmap.extract_features(
-        db, imgs, image_names=names, extraction_options=opts, camera_mode=pycolmap.CameraMode.SINGLE
+        db,
+        imgs,
+        image_names=names,
+        extraction_options=opts,
+        reader_options=reader,
+        camera_mode=pycolmap.CameraMode.SINGLE,
     )
     pycolmap.match_exhaustive(db)
-    maps = pycolmap.incremental_mapping(db, imgs, tmp_path)
+    mopts = pycolmap.IncrementalPipelineOptions()
+    mopts.ba_refine_focal_length = False
+    mopts.ba_refine_principal_point = False
+    mopts.ba_refine_extra_params = False
+    mopts.random_seed = 0
+    pycolmap.set_random_seed(0)
+    (tmp_path / "sparse").mkdir()
+    maps = pycolmap.incremental_mapping(db, imgs, tmp_path / "sparse", options=mopts)
     best = max(maps.values(), key=lambda r: r.num_reg_images())
     reg, err = best.num_reg_images(), best.compute_mean_reprojection_error()
     print(f"registered {reg}/{len(names)}, mean reproj {err:.3f} px")

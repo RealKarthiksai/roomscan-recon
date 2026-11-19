@@ -41,7 +41,10 @@
 | T-021 | P8: measure ETH3D dense and mesh F@5cm and textured held-out PSNR | P8 | | T-007 | thresholds HANDOFF.md §5 P8; PHASE_8.md shows PENDING |
 | T-022 | One-command check script (`pytest -m light` + ruff) | P0 | | T-004 | docs/PLAN.md §2 item 4; no `scripts/check.sh` or Makefile exists |
 | T-023 | Disk hygiene: free space under `runs/bench_phase3` per docs/PLAN.md §2 item 2 | P0 | owner | | current state not recorded; deleting runs needs owner OK |
-| T-024 | GPU batch: run the items in [heavy-compute/INVENTORY.md](heavy-compute/INVENTORY.md) in its priority order (E4/E5, E6 full res, `pytest -m gpu`, `pytest -m arkit` incl. ARKitScenes adapter, CUDA Docker build, P9) | P0, P9 | | GPU machine | docs/PLAN.md §3 "GPU machine batch"; PROGRESS.md "Pending for the GPU test machine" |
+| T-024 | GPU batch: run the items in [heavy-compute/INVENTORY.md](heavy-compute/INVENTORY.md) in its priority order (E4/E5, `pytest -m gpu`, `pytest -m arkit` incl. ARKitScenes adapter, CUDA Docker build, P9) | P0, P9 | | GPU machine | docs/PLAN.md §3 "GPU machine batch"; PROGRESS.md "Pending for the GPU test machine" |
+| T-025 | E6 env test registers 26/26 and runs: fix `DATA` path (#2) and use known-K resize like `refine` (#1); record measured result | P0 | | | brief e6-eth3d-env-fix; issues #1, #2 |
+| T-026 | ETH3D office SfM repeat-run gate: min registered over 5 seeded `refine` runs + split-model warning in SpatialMap quality; measure fixes if min < 26/26 | P2, P11 | | | issue #4; brief `sfm-repeat-gate`; known issue in PROGRESS.md "Phase 2 evidence" |
+| T-027 | Measure INTER_AREA pre-resize in ingest (`--max-side`) vs COLMAP internal resize on ETH3D-proxy and Replica; report only, no default change without a Scan Bundle | P2 | | T-026 | issue #3; brief `sfm-preresize-measure` |
 
 ## BLOCKED
 | ID | Task | Phase | Owner | Blocked by | Notes |
