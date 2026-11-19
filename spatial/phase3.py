@@ -15,7 +15,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 import open3d as o3d
-import pycolmap
+
+try:
+    import pycolmap
+except (ImportError, RuntimeError):
+    pycolmap = None
 
 from formats.models import DepthAlignment, DepthModelInfo, FrameAlignment, Priors
 from spatial.depth.align import (

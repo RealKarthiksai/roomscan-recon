@@ -73,7 +73,7 @@ def verify(root: Path) -> list[str]:
             problems.append(f"missing: {rel}")
         elif _sha256(p) != digest:
             problems.append(f"hash mismatch: {rel}")
-    on_disk = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()} - {MANIFEST}
+    on_disk = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {MANIFEST}
     problems += [f"not in manifest: {r}" for r in sorted(on_disk - set(man.files))]
     return problems
 

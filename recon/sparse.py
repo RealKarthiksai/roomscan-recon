@@ -7,7 +7,10 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-import pycolmap
+try:
+    import pycolmap
+except (ImportError, RuntimeError):
+    pycolmap = None
 
 from formats.spatial_map import SpatialMap
 from recon.openmvs import run_tool

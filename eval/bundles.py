@@ -64,7 +64,7 @@ def write_bundle(
         )
     for p in sorted(out.rglob("*")):
         if p.is_file() and p.name != "manifest.json":
-            files[str(p.relative_to(out))] = sha256(p)
+            files[p.relative_to(out).as_posix()] = sha256(p)
     man = {
         "schema_version": SCHEMA_VERSION,
         "capture_id": capture_id,

@@ -8,6 +8,7 @@ Usage: python data/fetch_replica.py --scenes room0 office0 --stride 5
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from remotezip import RemoteZip
@@ -21,7 +22,9 @@ def main() -> None:
     ap.add_argument("--stride", type=int, default=5)
     ap.add_argument("--out", type=Path, default=Path(__file__).parent / "replica")
     a = ap.parse_args()
-    with RemoteZip(URL) as z:
+    
+    z = RemoteZip(URL, timeout=30)
+    try:
         names = set(z.namelist())
         for scene in a.scenes:
             dst = a.out / scene
@@ -35,14 +38,34 @@ def main() -> None:
             for m in members:
                 rel = Path(m).relative_to("Replica")
                 target = a.out / rel if not rel.name.endswith("_mesh.ply") else a.out / rel.name
-                if target.exists():
+                if target.exists() and target.stat().st_size > 0:
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(z.read(m))
+                data = None
+                for attempt in range(5):
+                    try:
+                        data = z.read(m)
+                        break
+                    except Exception as e:
+                        if attempt == 4:
+                            raise
+                        print(f"Retry {attempt+1}/5 for {m} due to {e}")
+                        time.sleep(2 * (attempt + 1))
+                        try:
+                            z.close()
+                        except Exception:
+                            pass
+                        z = RemoteZip(URL, timeout=30)
+                target.write_bytes(data)
             (dst / "SUBSET.json").write_text(json.dumps(
                 {"source": URL, "scene": scene, "stride": a.stride, "n_frames_total": n_frames,
                  "frame_ids": keep}, indent=1))
             print(f"replica {scene}: {len(keep)}/{n_frames} frames -> {dst}")
+    finally:
+        try:
+            z.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

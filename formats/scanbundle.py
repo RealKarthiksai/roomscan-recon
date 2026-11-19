@@ -172,7 +172,7 @@ def validate_bundle(
             err("E_FILE_MISSING", rel)
         elif check_checksums and sha256(p) != digest:
             err("E_CHECKSUM", f"{rel} does not match its sha256")
-    on_disk = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()} - {"manifest.json"}
+    on_disk = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {"manifest.json"}
     for rel in sorted(on_disk - listed):
         warn("W_UNLISTED_FILE", f"{rel} is not in manifest.files (ignored)")
     for f in man.frames:

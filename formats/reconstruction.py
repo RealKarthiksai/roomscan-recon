@@ -20,7 +20,7 @@ def verify_reconstruction(root: Path) -> list[str]:
             problems.append(f"missing: {rel}")
         elif sha256_file(p) != digest:
             problems.append(f"hash mismatch: {rel}")
-    on_disk = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()} - {MANIFEST}
+    on_disk = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {MANIFEST}
     problems += [f"not in manifest: {r}" for r in sorted(on_disk - set(man.files))]
     for name, e in man.outputs.items():
         problems += [f"{name}: file not in manifest: {f}" for f in e.files if f not in man.files]

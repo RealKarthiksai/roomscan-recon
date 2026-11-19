@@ -172,7 +172,11 @@ def write_spatial_map(
     _put(phase5_dir / "room.json", out / "room.json", link)
     (out / "quality.json").write_text(quality.model_dump_json(indent=1))
 
-    files = {str(p.relative_to(out)): sha256_file(p) for p in sorted(out.rglob("*")) if p.is_file()}
+    files = {
+        p.relative_to(out).as_posix(): sha256_file(p)
+        for p in sorted(out.rglob("*"))
+        if p.is_file()
+    }
     man = SpatialMapManifest(
         version=FORMAT_VERSION,
         created=datetime.now(UTC).isoformat(),

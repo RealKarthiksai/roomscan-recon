@@ -124,7 +124,7 @@ def test_dataset_conventions_on_real_spatial_map():
 ETH3D_SM = ROOT / "runs/dev_p10_eth3d/spatial_map"
 
 
-@pytest.mark.gpu(vram_gb=8)
+@pytest.mark.gpu(vram_gb=4)
 def test_splat_training_eth3d_half_res(tmp_path):  # PENDING: GPU machine
     if not ETH3D_SM.exists():
         pytest.skip("needs runs/dev_p10_eth3d/spatial_map")

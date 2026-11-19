@@ -31,7 +31,12 @@ class MVSParams:
 
 
 def _docker(args: list[str], mounts: dict[Path, str], timeout: int) -> str:
-    cmd = ["docker", "run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}"]
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        *(["-u", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
+    ]
     for host, ctr in mounts.items():
         cmd += ["-v", f"{host.resolve()}:{ctr}"]
     cmd += [IMAGE, *args]

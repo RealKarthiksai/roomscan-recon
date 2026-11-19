@@ -52,8 +52,7 @@ def docker_cmd(
         "--rm",
         "--name",
         name or f"roomscan-{tool}-{uuid.uuid4().hex[:8]}",
-        "-u",
-        f"{os.getuid()}:{os.getgid()}",
+        *(["-u", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []),
         "-v",
         f"{out.resolve()}:/out",
     ]
